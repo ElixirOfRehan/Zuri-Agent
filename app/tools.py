@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 from .config import Settings
@@ -66,6 +72,33 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "run_command",
+            "description": (
+                "Run an allowlisted program inside the workspace without a shell. "
+                "Use for python, node, npm, git, pytest and rea."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "program": {"type": "string"},
+                    "arguments": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Argument list; no shell quoting.",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 600,
+                    },
+                },
+                "required": ["program"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "report_blocked",
             "description": (
                 "Report that the task cannot be completed and why. Use this "
@@ -99,8 +132,12 @@ TOOL_DEFINITIONS = [
 ]
 
 
-KNOWN_TOOLS = {"list_dir", "read_file", "write_file"}
+KNOWN_TOOLS = {"list_dir", "read_file", "write_file", "run_command"}
 CONTROL_TOOLS = {"report_blocked"}
+
+GIT_BLOCKED = {"push", "pull", "fetch", "clone", "remote", "submodule"}
+NPM_BLOCKED = {"install", "publish", "exec", "ci", "link", "unpublish", "add"}
+OUTPUT_LIMIT = 20_000
 
 
 class ToolSet:
@@ -141,6 +178,8 @@ class ToolSet:
                 return self._write_file(
                     str(arguments.get("path", "")), str(arguments.get("content", ""))
                 )
+            if name == "run_command":
+                return self._run_command(arguments)
             return json.dumps({"error": f"unknown tool: {name}"})
         except SandboxError as error:
             return json.dumps({"error": f"sandbox: {error}"})
@@ -148,6 +187,146 @@ class ToolSet:
             return json.dumps({"error": f"filesystem: {error}"})
         except Exception as error:  # noqa: BLE001 - tool errors go back to the model
             return json.dumps({"error": f"tool failed: {error}"})
+
+    def _run_command(self, arguments: dict) -> str:
+        if not self.settings.shell_enabled:
+            return json.dumps({"error": "shell is disabled"})
+        program = str(arguments.get("program", "")).strip().lower()
+        allowed = {item.lower() for item in self.settings.allowed_commands}
+        if program not in allowed:
+            return json.dumps(
+                {
+                    "error": f"program not allowed: {program}",
+                    "allowed": sorted(allowed),
+                }
+            )
+        raw_args = arguments.get("arguments", [])
+        if raw_args is None:
+            raw_args = []
+        if not isinstance(raw_args, list) or any(
+            not isinstance(item, str) for item in raw_args
+        ):
+            return json.dumps({"error": "arguments must be a list of strings"})
+        args = list(raw_args)
+        for arg in args:
+            if self._unsafe_argument(arg):
+                return json.dumps({"error": f"unsafe argument blocked: {arg}"})
+        policy_error = self._command_policy(program, args)
+        if policy_error:
+            return json.dumps({"error": policy_error})
+        try:
+            timeout = int(arguments.get("timeout_seconds", 120))
+        except (TypeError, ValueError):
+            timeout = 120
+        timeout = max(1, min(600, timeout))
+        executable = self._resolve_program(program)
+        if executable is None:
+            return json.dumps({"error": f"program not found: {program}"})
+        command = [executable, *args]
+        if program == "pytest":
+            command = [sys.executable, "-m", "pytest", *args]
+        started = time.time()
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(self.settings.workspace_dir),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                shell=False,
+            )
+        except subprocess.TimeoutExpired:
+            self.storage.add_event(
+                self.task_id,
+                self.agent,
+                "command_output",
+                {
+                    "program": program,
+                    "arguments": args,
+                    "error": "timeout",
+                    "timeout_seconds": timeout,
+                },
+            )
+            return json.dumps(
+                {"error": f"command timed out after {timeout}s", "program": program}
+            )
+        except OSError as error:
+            return json.dumps({"error": f"command failed to start: {error}"})
+        duration = round(time.time() - started, 3)
+        stdout = completed.stdout or ""
+        stderr = completed.stderr or ""
+        truncated = len(stdout) > OUTPUT_LIMIT or len(stderr) > OUTPUT_LIMIT
+        stdout = stdout[:OUTPUT_LIMIT]
+        stderr = stderr[:OUTPUT_LIMIT]
+        self.storage.add_event(
+            self.task_id,
+            self.agent,
+            "command_output",
+            {
+                "program": program,
+                "arguments": args,
+                "exit_code": completed.returncode,
+                "duration_seconds": duration,
+                "stdout": stdout[:4000],
+                "stderr": stderr[:4000],
+                "truncated": truncated,
+            },
+        )
+        return json.dumps(
+            {
+                "program": program,
+                "arguments": args,
+                "exit_code": completed.returncode,
+                "duration_seconds": duration,
+                "stdout": stdout,
+                "stderr": stderr,
+                "truncated": truncated,
+            }
+        )
+
+    @staticmethod
+    def _unsafe_argument(argument: str) -> bool:
+        if argument.startswith("-"):
+            return False
+        if re.match(r"^[A-Za-z]:[\\/]", argument):
+            return True
+        if argument.startswith(("/", "\\")):
+            return True
+        parts = argument.replace("\\", "/").split("/")
+        return ".." in parts
+
+    @staticmethod
+    def _command_policy(program: str, args: list[str]) -> str | None:
+        if program == "git":
+            if "--global" in args or "--system" in args:
+                return "global/system git config is not allowed"
+            subcommand = None
+            skip = False
+            for item in args:
+                if skip:
+                    skip = False
+                    continue
+                if item in {"-C", "-c", "--git-dir", "--work-tree"}:
+                    skip = True
+                    continue
+                if item.startswith("-"):
+                    continue
+                subcommand = item.lower()
+                break
+            if subcommand in GIT_BLOCKED:
+                return f"git {subcommand} is blocked (network/remote)"
+        if program == "npm":
+            for item in args:
+                if item.lower() in NPM_BLOCKED:
+                    return f"npm {item} is blocked (network/install)"
+        return None
+
+    def _resolve_program(self, program: str) -> str | None:
+        if program in {"python", "python3", "py", "pytest"}:
+            return sys.executable
+        return shutil.which(program)
 
     def _report_blocked(self, arguments: dict) -> str:
         reason = str(arguments.get("reason", "")).strip()

@@ -13,9 +13,9 @@
     success.
   - Specialists must be genuinely powerful (tools + SOPs + memory + checks).
   - Instagram was only an example; **not scheduled**.
-- Current step: **Slice 1D implemented and internally verified — awaiting user
-  confirmation.** The local web dashboard is available. Next: user choice of
-  Engineering department or UI polish.
+- Current step: **Slice 2 (Engineering + tool layer) implemented and internally
+  verified — awaiting user confirmation.** OpenCode/QA/parallel work are later.
+  Next: user choice of OpenCode/QA or UI polish.
 - Slice 1A evidence (2026-11-09):
   - 29 automated tests pass.
   - HR created proposal `p_e5bd52ef05` → agent `notes` (write_file only).
@@ -100,6 +100,22 @@
     basic UI.
 - Next: user opens the dashboard and decides Engineering department vs UI
   polish. The assistant owns testing; no command homework.
+- Slice 2 implemented (2026-11-10):
+  - 84 automated tests pass.
+  - `run_command` tool: structured program+args, workspace cwd, no shell,
+    allowlist (python/node/npm/git/pytest/rea), blocked absolute/traversal
+    paths, blocked git network/global config and npm install/publish.
+  - Command output is logged as `command_output` evidence; timeout/output
+    limits; `ZURI_SHELL_ENABLED=0` disables.
+  - Seeded Engineering agent (v4-pro) with list/read/write/run_command; HR can
+    grant run_command to code/test roles.
+  - Live: task `t_69bc923bf609` created `work/hello.py`, ran
+    `python work/hello.py` (exit 0, stdout `hello from engineering`), wrote
+    `work/run.txt`; verifier 6/6; ~$0.006691; command_output recorded.
+  - `rea --version` reachable through run_command; engineering mind updated.
+  - Fixed Windows console encoding crash in `show --json` (UTF-8 output).
+  - Security warning: not an OS sandbox; code runs with user permissions.
+- Next: choose OpenCode/QA or UI polish after confirmation.
 - New requirements (2026-11-09):
   - **Dynamic agent mind:** create an agent with little detail; it builds a
     versioned profile/SOP/memory from verified work and user feedback. User can
@@ -155,9 +171,10 @@
 
 ## Next
 
-- 1D is internally verified and awaiting user confirmation.
-- User opens `zuri.cmd serve` → `http://127.0.0.1:8765` and sends a request.
-- Then choose: (a) Engineering department (REA/OpenCode), or (b) UI polish.
+- Slice 2 is internally verified and awaiting user confirmation.
+- User can open `zuri.cmd serve` → `http://127.0.0.1:8765` and submit an
+  engineering request.
+- Then choose: (a) OpenCode integration + QA reviewer, or (b) UI polish.
 - The user gives goals in chat; no command homework.
 - The assistant runs all tests and reports plain-language results.
 

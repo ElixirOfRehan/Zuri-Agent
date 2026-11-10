@@ -323,6 +323,33 @@ Limits:
 Verification: 70 tests pass; Liar Test still passes.
 Awaiting user confirmation of 1D; next choice Engineering vs UI polish.
 
+## 2026-11-10 — Slice 2 Engineering + tool layer implemented (internal)
+
+Delivered:
+- `run_command` tool (structured `program` + `arguments`, no shell, workspace
+  cwd, allowlist python/node/npm/git/pytest/rea, timeout, output limit).
+- Blocked: unknown programs, absolute/traversal args, git network/global
+  config, npm install/publish/exec/ci/link.
+- Every command recorded as `command_output` with exit code/stdout/stderr
+  (bounded) and duration.
+- Shell can be disabled with `ZURI_SHELL_ENABLED=0`; allowlist configurable.
+- Seeded `engineering` agent (deepseek-v4-pro) with list/read/write/run_command
+  and an engineering SOP; HR may grant run_command for code/test roles.
+- README security warning: not an OS sandbox; code runs with user permissions.
+- Fixed Windows console encoding crash in `show --json` by reconfiguring CLI
+  output to UTF-8.
+
+Live proof:
+- `t_69bc923bf609`: engineering assigned; wrote work/hello.py; ran
+  `python work/hello.py` (exit 0, stdout `hello from engineering`); wrote
+  work/run.txt; verifier 6/6; ~$0.006691; command_output event recorded.
+- `rea --version` reachable via run_command; toolchain git/pytest/npm versions
+  tested.
+- 84 tests pass; Liar Test still passes.
+
+Awaiting user confirmation of Slice 2; next choice OpenCode/QA vs UI polish.
+
+
 
 
 

@@ -178,6 +178,25 @@ def test_restore_multiple_snapshots(tmp_path):
     assert actions.count("agent_restored") == 2
 
 
+def test_event_redaction(tmp_path):
+    settings = make_settings(tmp_path)
+    storage = Storage(settings)
+    task_id = storage.create_task("redact")
+    storage.add_event(
+        task_id,
+        "worker",
+        "message",
+        {"text": "key sk-abc123456 and Bearer token123"},
+    )
+    events = storage.get_events(task_id)
+    serialized = __import__("json").dumps(events)
+    assert "sk-abc123456" not in serialized
+    assert "token123" not in serialized
+    ledger = (settings.data_dir / "ledger.jsonl").read_text(encoding="utf-8")
+    assert "sk-abc123456" not in ledger
+    storage.close()
+
+
 def test_planner_failure_becomes_failed_task(tmp_path):
     settings = make_settings(tmp_path)
     kernel = Kernel(settings)

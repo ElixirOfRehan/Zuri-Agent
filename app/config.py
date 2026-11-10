@@ -30,6 +30,17 @@ class Settings:
     reflector_model: str = "deepseek-flash"
     reflection_enabled: bool = True
     resilience_model: str = "deepseek-v4-pro"
+    shell_enabled: bool = True
+    allowed_commands: tuple[str, ...] = (
+        "python",
+        "python3",
+        "py",
+        "node",
+        "npm",
+        "git",
+        "pytest",
+        "rea",
+    )
     request_timeout_s: int = 120
     max_read_bytes: int = 65_536
     max_write_bytes: int = 1_000_000
@@ -105,6 +116,18 @@ class Settings:
                 "ZURI_RESILIENCE_MODEL",
                 os.getenv("ZURI_BOSS_MODEL", "deepseek-v4-pro"),
             ).strip(),
+            shell_enabled=os.getenv("ZURI_SHELL_ENABLED", "1")
+            .strip()
+            .lower()
+            not in {"0", "false", "no", "off"},
+            allowed_commands=tuple(
+                item.strip()
+                for item in os.getenv(
+                    "ZURI_ALLOWED_COMMANDS",
+                    "python,python3,py,node,npm,git,pytest,rea",
+                ).split(",")
+                if item.strip()
+            ),
             request_timeout_s=int(os.getenv("ZURI_REQUEST_TIMEOUT_S", "120")),
             thinking=os.getenv("ZURI_THINKING", "disabled").strip().lower(),
         )

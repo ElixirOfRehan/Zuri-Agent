@@ -7,8 +7,9 @@ actually done.
 **Core promise:** you can see every action and every artifact. No task succeeds
 because an AI said so; it succeeds only when the evidence matches the ledger.
 
-Status: **Slice 1D implemented — awaiting user confirmation.** The local web
-dashboard is available; later slices can polish it or add departments.
+Status: **Slice 2 (Engineering + tool layer) implemented — awaiting user
+confirmation.** The local dashboard is available; OpenCode/QA/parallel work are
+later.
 
 ## Web dashboard (local)
 
@@ -144,6 +145,39 @@ legal opinion. They never silently fake success.
 
 Each agent gets only the tools in its profile. System agents (`boss`, `hr`,
 `worker`) cannot be deleted or re-created by the user.
+
+## Engineering agent and shell
+
+The seeded `engineering` agent has `list_dir`, `read_file`, `write_file`, and
+`run_command`. It can run:
+
+```powershell
+.\zuri.cmd run "Use the engineering agent to create work/hello.py that prints hello, run it with python, and save the output to work/run.txt."
+```
+
+`run_command` is structured (`program` + argument list), runs with the workspace
+as cwd, and has no shell. It is allowlisted (`python`, `node`, `npm`, `git`,
+`pytest`, `rea`) and blocks:
+
+- unknown programs,
+- absolute paths and `..` traversal in arguments,
+- `git push/pull/fetch/clone/remote/submodule`, global/system git config,
+- `npm install/publish/exec/ci/link` (network/install actions).
+
+Every command and its output is logged (`command_output` events). Set
+`ZURI_SHELL_ENABLED=0` to disable the tool, or `ZURI_ALLOWED_COMMANDS` to narrow
+the allowlist.
+
+**Important:** this is not an OS sandbox. Python/Node code runs with your user
+permissions and may read files or use the network. Use the engineering agent
+only on trusted work, and review its commands.
+
+REA is available through the `rea` CLI from inside the workspace, for example
+`rea --version` or `rea inspect-android-package <relative-apk>` after copying a
+target into the workspace.
+
+OpenCode integration, a separate QA reviewer and parallel departments are later
+slices.
 
 ## What is recorded
 

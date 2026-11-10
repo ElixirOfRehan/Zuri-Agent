@@ -200,12 +200,29 @@ user is not expected to run commands or interpret raw logs.
 - [ ] UI authentication / non-loopback binding
 - [ ] monthly hard budget cap
 
+### Engineering tool layer (2)
+- [x] python command execution and output evidence
+- [x] unknown program blocked
+- [x] absolute path and `..` traversal blocked
+- [x] git push / global config blocked
+- [x] npm install blocked
+- [x] timeout
+- [x] shell disabled
+- [x] output truncation
+- [x] git/pytest/npm version commands
+- [x] `rea` reachable through run_command
+- [x] Engineering agent profile and live engineering task
+- [ ] OpenCode integration
+- [ ] separate QA reviewer
+- [ ] per-command approval for risky commands
+- [ ] OS-level sandbox
+
 ## Current status
 
-- 70 automated tests pass.
+- 84 automated tests pass.
 - Liar Test passes.
-- Live verified tasks through Slice 1D; reflection, blocked/alternative paths
-  and the web dashboard are live-tested.
+- Live verified tasks through Slice 2; reflection, resilience, dashboard and the
+  engineering tool layer are live-tested.
 
 ## Known limits
 

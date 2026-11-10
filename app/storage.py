@@ -155,7 +155,7 @@ class Storage:
 
     def add_event(self, task_id: str, agent: str, event_type: str, data: dict) -> dict:
         ts = utc_now()
-        payload = json.dumps(data, ensure_ascii=False, default=str)
+        payload = redact(json.dumps(data, ensure_ascii=False, default=str))
         with self.connection:
             cursor = self.connection.execute(
                 "INSERT INTO events (task_id, ts, agent, type, data_json) "
@@ -388,7 +388,7 @@ class Storage:
 
     def add_agent_event(self, agent_id: str, action: str, data: dict) -> dict:
         ts = utc_now()
-        payload = json.dumps(data, ensure_ascii=False, default=str)
+        payload = redact(json.dumps(data, ensure_ascii=False, default=str))
         with self.connection:
             cursor = self.connection.execute(
                 "INSERT INTO agent_events (agent_id, action, data_json, ts) "
