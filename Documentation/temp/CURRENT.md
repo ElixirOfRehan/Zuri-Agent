@@ -26,6 +26,12 @@
   - Correct two confirmations soft-deleted to
     `agents/.trash/notes-20261109-153000-5bcd23`; restore succeeded.
   - Audit events recorded in `agent_events` + `data/agent_ledger.jsonl`.
+  - User test follow-up: one run failed with `Connection error.` (transient
+    network; `zuri ping` returned OK). Retried → `t_cdf1b1b8cc6c` succeeded,
+    assignee `notes`, 4/4 checks, ~$0.001642.
+  - Added simple commands: `last`, `verify-last`, `guide`, `ping`; clearer
+    two-step delete prompts; restore reports "still active" instead of ERROR.
+  - 29 tests pass.
 - Slice 1A plan:
   `Documentation/Planning/Zuri2/02_Slice1A_Agent_Lifecycle.md`
   - Folder layout: `agents/<id>/profile.json`, `memory.jsonl`, `profiles/`.
@@ -46,9 +52,12 @@
     report `blocked` with evidence. Never fake success; never bypass
     law/platform rules/permissions.
   - Plans: `03_Slice1B_Agent_Mind.md`, `04_Slice1C_Resilience.md`.
-- GitHub repo: `https://github.com/ElixirOfRehan/Zuri-Agent.git` (empty).
-  Local `git user.name` / `user.email` are not set; nothing committed or
-  pushed yet.
+- GitHub repo: `https://github.com/ElixirOfRehan/Zuri-Agent.git`
+  - Pushed `main` (commit `304b9bd`; initial `76f278c`).
+  - Commit email uses `ElixirOfRehan@users.noreply.github.com` because
+    `ra57000rehan@gmail.com` is private on GitHub (push was rejected until the
+    noreply address was used).
+  - `.env`, `data/`, `workspace/`, agent memory/trash are gitignored.
 - Slice 0 user test:
   - `zuri liar-test` rejected the fake claim.
   - `zuri run "Create notes/test.md ..."` → `t_64b1feaa9e32` succeeded.
@@ -86,21 +95,20 @@
 
 ## Next
 
-- User test Slice 1A:
-  1. `zuri.cmd agent list`
-  2. `zuri.cmd agent show notes`
-  3. `zuri.cmd run "Use the notes agent to create work/test2.md with a short list."`
-  4. `zuri.cmd show <task-id>` → assignee is notes; only its tools were used.
-  5. `zuri.cmd agent delete notes` with wrong confirmations → aborts.
-  6. Delete again with exact id + `DELETE notes` → soft-delete.
-  7. `zuri.cmd agent restore notes` → back in `agent list`.
+- User test Slice 1A with the simple path:
+  1. `zuri.cmd guide`
+  2. `zuri.cmd run "Create notes/hello.md with the text 'hello'"`
+  3. `zuri.cmd last`
+  4. `zuri.cmd verify-last`
+  5. `zuri.cmd agent list` / `agent show notes`
+  6. Deletion test: `agent delete notes` → wrong input aborts; repeat with
+     `notes` then `DELETE notes`; `agent restore notes`.
+- If the API fails with `Connection error`, run `zuri.cmd ping` and retry.
 - After user confirms 1A: implement 1B (Agent Mind), then 1C (Resilience), then
   1D (Company kernel).
-- GitHub: user to confirm push; set `user.name`/`user.email` first.
 - Do not implement 1B before confirmation.
 
 ## Open questions
 
-- GitHub commit identity (name/email) and push confirmation.
 - Monthly model budget cap.
 - Whether voice stays in scope for v2 or comes later.

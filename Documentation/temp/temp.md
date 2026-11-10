@@ -184,6 +184,31 @@ Live verification:
 
 No GitHub commit/push yet (identity unset).
 
+## 2026-11-10 — Slice 1A test follow-up + GitHub push
+
+User test:
+- One `zuri run` failed immediately with `Connection error.` (no model usage).
+  Direct API check + `zuri ping` showed DeepSeek is reachable; retried and the
+  same task succeeded: `t_cdf1b1b8cc6c`, assignee notes, 4/4 checks,
+  ~$0.001642.
+- Deletion abort worked as designed (user typed the REM comments as
+  confirmations). Prompts are now clearer (step 1/2, exact text, ABORTED).
+- `agent restore notes` while the agent is active now explains "still active"
+  instead of an ERROR.
+- Added `last`, `verify-last`, `guide`, `ping` so verification does not require
+  copying task ids.
+- OpenAI SDK retries increased to 3 for transient connection errors.
+- Reports now show the last error reason for failed tasks.
+
+GitHub:
+- Local git initialized; `user.name=Rehan`,
+  `user.email=ElixirOfRehan@users.noreply.github.com`.
+- First push rejected: `GH007` because `ra57000rehan@gmail.com` is private.
+- Amended to the GitHub noreply email; pushed `main`.
+- Remote: initial `76f278c`, docs `304b9bd`.
+- `.env`, `data/`, `workspace/` contents, agent memory and trash are ignored.
+
+
 
 
 
