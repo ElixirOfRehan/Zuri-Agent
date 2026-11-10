@@ -206,7 +206,8 @@ GitHub:
 - First push rejected: `GH007` because `ra57000rehan@gmail.com` is private.
 - Amended to the GitHub noreply email; pushed `main`.
 - Remote: initial `76f278c`, docs `304b9bd`, mind `9ce411a`, resilience `44a8b5a`,
-  dashboard `86a0a33`, engineering `ea946b3`, opencode+QA `b29a172`.
+  dashboard `86a0a33`, engineering `ea946b3`, opencode+QA `b29a172`,
+  research+web `945122c`.
 - `.env`, `data/`, `workspace/` contents, agent memory and trash are ignored.
 
 ## 2026-11-10 - User 1A test passed
