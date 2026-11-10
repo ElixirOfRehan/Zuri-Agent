@@ -292,6 +292,37 @@ Verification:
 
 Awaiting user confirmation of 1C before 1D.
 
+## 2026-11-10 — Slice 1D implemented (internal)
+
+Scope delivered:
+- FastAPI local dashboard (`app/web.py`) with inline HTML/CSS/JS:
+  chat input, task list/detail, checks/artifacts/attempts/timeline, agent mind,
+  approvals, cost ledger.
+- In-process one-at-a-time `JobQueue` (`app/scheduler.py`); UI and approvals
+  return job ids and poll.
+- `Storage.cost_summary()` total/monthly/by-agent/recent; `list_tasks_by_status`.
+- CLI `serve`, `approvals`, `costs`; guide mentions the dashboard.
+- Dependencies: fastapi, uvicorn; dev httpx.
+- Tests: FastAPI endpoints with fake runner/approver, API-key refusal, cost
+  summary/status filter.
+
+Live test:
+- Started `zuri serve` on 127.0.0.1:8766.
+- GET `/` 200, title present.
+- POST `/api/run` → job succeeded → `t_2bc2b0ccc51c`; assignee notes; 3/3
+  checks; 1 artifact; report verified; ~$0.001924.
+- `/api/summary` returned 20 tasks, 4 agents, total cost.
+- Server stopped; port free.
+
+Limits:
+- Localhost only, no authentication.
+- In-memory queue; restart loses queued jobs.
+- One worker; basic UI; cost cap informational (per-task budgets enforced).
+
+Verification: 70 tests pass; Liar Test still passes.
+Awaiting user confirmation of 1D; next choice Engineering vs UI polish.
+
+
 
 
 ## 2026-11-10 — 1A confirmed; understanding + test ownership

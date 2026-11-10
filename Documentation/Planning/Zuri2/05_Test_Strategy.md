@@ -185,12 +185,27 @@ user is not expected to run commands or interpret raw logs.
    and known limitations. The user is not asked to run test commands.
 7. Git commit + push (when the repo is configured).
 
+### Web dashboard and queue (1D)
+- [x] dashboard HTML loads
+- [x] summary endpoint (tasks/agents/queue/cost)
+- [x] task detail endpoint
+- [x] agent list/detail endpoints
+- [x] cost summary + per-status task filter
+- [x] POST run enqueues and completes a job (fake runner)
+- [x] POST approve enqueues and completes (fake approver)
+- [x] run refused without API key
+- [x] live web run (real DeepSeek, real task)
+- [ ] queue survives server restart
+- [ ] multiple workers/concurrency
+- [ ] UI authentication / non-loopback binding
+- [ ] monthly hard budget cap
+
 ## Current status
 
-- 67 automated tests pass.
+- 70 automated tests pass.
 - Liar Test passes.
-- Live verified tasks through Slice 1C; reflection adds evidence-backed
-  lessons only from verified work; blocked/alternative paths are live-tested.
+- Live verified tasks through Slice 1D; reflection, blocked/alternative paths
+  and the web dashboard are live-tested.
 
 ## Known limits
 

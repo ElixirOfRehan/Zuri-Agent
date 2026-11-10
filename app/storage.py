@@ -124,6 +124,14 @@ class Storage:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_tasks_by_status(self, status: str, limit: int = 50) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT id, created_at, status, request FROM tasks "
+            "WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def set_status(self, task_id: str, status: str) -> None:
         with self.connection:
             self.connection.execute(
@@ -338,6 +346,45 @@ class Storage:
             (task_id,),
         ).fetchone()
         return int(row[0])
+
+    def cost_summary(self) -> dict:
+        total = self.connection.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0), "
+            "COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM costs"
+        ).fetchone()
+        by_agent = [
+            dict(row)
+            for row in self.connection.execute(
+                "SELECT agent, model, "
+                "SUM(prompt_tokens) AS prompt_tokens, "
+                "SUM(completion_tokens) AS completion_tokens, "
+                "SUM(cost_usd) AS cost_usd, COUNT(*) AS calls "
+                "FROM costs GROUP BY agent, model ORDER BY cost_usd DESC"
+            ).fetchall()
+        ]
+        recent = [
+            dict(row)
+            for row in self.connection.execute(
+                "SELECT task_id, SUM(cost_usd) AS cost_usd, "
+                "SUM(prompt_tokens + completion_tokens) AS tokens, "
+                "MAX(ts) AS last_ts FROM costs GROUP BY task_id "
+                "ORDER BY last_ts DESC LIMIT 30"
+            ).fetchall()
+        ]
+        month_start = datetime.now(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        ).isoformat(timespec="seconds")
+        monthly = self.connection.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0) FROM costs WHERE ts >= ?",
+            (month_start,),
+        ).fetchone()
+        return {
+            "total_cost_usd": float(total[0]),
+            "total_tokens": int(total[1]),
+            "monthly_cost_usd": float(monthly[0]),
+            "by_agent": by_agent,
+            "recent_tasks": recent,
+        }
 
     def add_agent_event(self, agent_id: str, action: str, data: dict) -> dict:
         ts = utc_now()

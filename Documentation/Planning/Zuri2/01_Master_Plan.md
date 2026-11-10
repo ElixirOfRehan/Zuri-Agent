@@ -349,8 +349,11 @@ Plan: `04_Slice1C_Resilience.md`.
 
 ### Slice 1D — Company kernel v0
 
+Status: **implemented, awaiting user confirmation.**
+
 Queue/scheduler, approvals inbox, budgets/cost ledger, dashboard v0 (task
 timeline, evidence viewer, agent mind viewer).
+Plan/details: `06_Slice1D_Company_Kernel.md`.
 
 ### Slice 2 — Engineering specialist
 

@@ -7,8 +7,25 @@ actually done.
 **Core promise:** you can see every action and every artifact. No task succeeds
 because an AI said so; it succeeds only when the evidence matches the ledger.
 
-Status: **Slice 1C implemented — awaiting user confirmation.** No later slice
-started.
+Status: **Slice 1D implemented — awaiting user confirmation.** The local web
+dashboard is available; later slices can polish it or add departments.
+
+## Web dashboard (local)
+
+```powershell
+.\zuri.cmd serve
+```
+
+Open `http://127.0.0.1:8765`.
+
+- Talk to Zuri in a chat-style box; the task runs in a one-at-a-time queue.
+- See every task: status, assignee, checks, artifacts, attempts, cost, timeline.
+- See agent minds: style, SOP notes, memory, versions, pending changes.
+- Approve tasks waiting for approval.
+- See the cost ledger.
+
+It binds to `127.0.0.1` only and has no login. The queue is in memory: stopping
+the server loses queued jobs (completed tasks remain in the database).
 
 ## Quick start
 
@@ -38,6 +55,8 @@ If a run fails:
 ```powershell
 .\zuri.cmd ping            # test the DeepSeek connection
 .\zuri.cmd last            # shows the failure reason
+.\zuri.cmd approvals       # tasks waiting for approval
+.\zuri.cmd costs           # cost ledger
 ```
 
 `.\zuri.cmd guide` prints the simple test steps.

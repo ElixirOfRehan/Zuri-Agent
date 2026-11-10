@@ -493,6 +493,8 @@ def cmd_guide(args: argparse.Namespace) -> int:
     print("5. Explain it simply:   zuri.cmd explain")
     print("6. Full raw timeline:   zuri.cmd show <task-id>")
     print("")
+    print("Web dashboard:          zuri.cmd serve   (then open http://127.0.0.1:8765)")
+    print("")
     print("Create an agent:")
     print("  zuri.cmd agent create \"Create an agent named Notes that writes markdown.\"")
     print("  zuri.cmd agent approve <proposal-id>")
@@ -683,6 +685,66 @@ def cmd_agent_reject_change(args: argparse.Namespace) -> int:
             args.agent_id, args.change_id
         )
         print(f"Rejected {change.change_id} ({change.kind}) for {args.agent_id}.")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    settings = Settings.load()
+    if not settings.has_api_key:
+        print("WARNING: DEEPSEEK_API_KEY is missing; tasks will fail.")
+    print(f"Zuri dashboard: http://127.0.0.1:{args.port}")
+    print("Local only. Press Ctrl+C to stop.")
+    uvicorn.run(
+        "app.web:app",
+        host="127.0.0.1",
+        port=args.port,
+        log_level="info",
+    )
+    return 0
+
+
+def cmd_approvals(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        tasks = kernel.storage.list_tasks_by_status("awaiting_approval", 50)
+        if not tasks:
+            print("No approvals waiting.")
+            return 0
+        for task in tasks:
+            print(f"{task['id']}  {task['created_at']}  {task['request']}")
+            print(f"  approve: zuri approve {task['id']}")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_costs(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        data = kernel.storage.cost_summary()
+        print(
+            f"Total: ${data['total_cost_usd']:.6f} | "
+            f"{data['total_tokens']} tokens"
+        )
+        print(f"This month: ${data['monthly_cost_usd']:.6f}")
+        print("By agent:")
+        for item in data["by_agent"]:
+            print(
+                f"  {item['agent']}/{item['model']}: "
+                f"{item['calls']} calls, ${item['cost_usd']:.6f}"
+            )
+        print("Recent tasks:")
+        for item in data["recent_tasks"][:10]:
+            print(
+                f"  {item['task_id']}  {item['tokens']} tokens  "
+                f"${item['cost_usd']:.6f}"
+            )
         return 0
     finally:
         kernel.close()
@@ -976,6 +1038,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     ping = sub.add_parser("ping", help="Test the DeepSeek API connection")
     ping.set_defaults(func=cmd_ping)
+
+    serve = sub.add_parser("serve", help="Start the local web dashboard")
+    serve.add_argument("--port", type=int, default=8765)
+    serve.set_defaults(func=cmd_serve)
+
+    approvals = sub.add_parser("approvals", help="List tasks waiting for approval")
+    approvals.set_defaults(func=cmd_approvals)
+
+    costs = sub.add_parser("costs", help="Show cost ledger")
+    costs.set_defaults(func=cmd_costs)
 
     agent = sub.add_parser("agent", help="Manage specialist agents")
     agent_sub = agent.add_subparsers(dest="agent_command", required=True)

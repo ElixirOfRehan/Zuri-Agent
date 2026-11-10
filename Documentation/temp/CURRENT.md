@@ -13,9 +13,9 @@
     success.
   - Specialists must be genuinely powerful (tools + SOPs + memory + checks).
   - Instagram was only an example; **not scheduled**.
-- Current step: **Slice 1C implemented and internally verified — awaiting user
-  confirmation.** Slice 1D (Company kernel/dashboard) is next only after
-  confirmation.
+- Current step: **Slice 1D implemented and internally verified — awaiting user
+  confirmation.** The local web dashboard is available. Next: user choice of
+  Engineering department or UI polish.
 - Slice 1A evidence (2026-11-09):
   - 29 automated tests pass.
   - HR created proposal `p_e5bd52ef05` → agent `notes` (write_file only).
@@ -86,6 +86,20 @@
   - Test-only `assistant` agent created during the live resilience test was
     soft-deleted with two confirmations (cleanup).
 - Next: 1D Company kernel/dashboard after user confirmation.
+- Slice 1D implemented (2026-11-10):
+  - 70 automated tests pass.
+  - Local chat-style dashboard (`zuri serve`, `http://127.0.0.1:8765`):
+    submit requests, task list/detail, artifacts, checks, attempts, timeline,
+    agent mind viewer, approvals, cost ledger.
+  - One-at-a-time in-process job queue; approvals run through the same queue.
+  - CLI `approvals`, `costs`, `serve`; cost summary total/month/by-agent/recent.
+  - Live web run: `t_2bc2b0ccc51c` via POST `/api/run`, assignee notes, 3/3
+    checks, artifact, report verified, ~$0.001924; summary/tasks/agents/costs
+    endpoints OK; server stopped, port free.
+  - Limits: localhost/no login, in-memory queue (not durable), one worker,
+    basic UI.
+- Next: user opens the dashboard and decides Engineering department vs UI
+  polish. The assistant owns testing; no command homework.
 - New requirements (2026-11-09):
   - **Dynamic agent mind:** create an agent with little detail; it builds a
     versioned profile/SOP/memory from verified work and user feedback. User can
@@ -141,10 +155,9 @@
 
 ## Next
 
-- 1C is internally verified and awaiting user confirmation.
-- After confirmation: implement 1D Company kernel (queue/scheduler, approvals
-  inbox, budgets/cost ledger, dashboard timeline/evidence/mind viewer).
-- Then the chat UI.
+- 1D is internally verified and awaiting user confirmation.
+- User opens `zuri.cmd serve` → `http://127.0.0.1:8765` and sends a request.
+- Then choose: (a) Engineering department (REA/OpenCode), or (b) UI polish.
 - The user gives goals in chat; no command homework.
 - The assistant runs all tests and reports plain-language results.
 

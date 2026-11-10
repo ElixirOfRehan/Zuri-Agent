@@ -11,10 +11,12 @@ dependencies = [
     "openai>=1.40",
     "pydantic>=2.7",
     "python-dotenv>=1.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
 zuri = "app.cli:main"
