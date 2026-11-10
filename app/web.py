@@ -278,6 +278,7 @@ async function showTask(id) {
     const artifacts = data.artifacts || [];
     const attempts = data.attempts || [];
     const mind = data.mind_update;
+    const qa = data.qa_review;
     const policy = data.policy_block;
     const end = data.resilience_end;
     const events = (data.events || []).slice(-40).reverse();
@@ -313,6 +314,7 @@ async function showTask(id) {
           ${policy ? `<div class="err" style="margin-top:8px">Policy block: ${esc(policy.reason)}</div>` : ""}
           ${end ? `<div class="err" style="margin-top:8px">Blocked: ${esc(end.reason)}. Need: ${esc(end.needed || "user input")}</div>` : ""}
           ${mind ? `<div class="muted" style="margin-top:8px">Mind updated: ${mind.facts} facts, ${mind.sop_notes} SOP notes, ${mind.suggestions} pending suggestions (v${mind.version}).</div>` : ""}
+          ${qa ? `<div class="${qa.verdict === "fail" ? "err" : "muted"}" style="margin-top:8px">QA: ${esc(qa.verdict)}${(qa.issues || []).length ? " — " + esc(qa.issues.join("; ")) : ""}</div>` : ""}
         </div>
         <div>
           <h2>Plain report</h2>
@@ -483,6 +485,14 @@ def create_app(settings: Settings | None = None, runner=None, approver=None, max
                     event["data"]
                     for event in reversed(events)
                     if event["type"] == "mind_updated"
+                ),
+                None,
+            )
+            data["qa_review"] = next(
+                (
+                    event["data"]
+                    for event in reversed(events)
+                    if event["type"] == "qa_review"
                 ),
                 None,
             )

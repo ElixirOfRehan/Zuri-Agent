@@ -27,9 +27,13 @@ class Settings:
     boss_spec_path: Path
     worker_spec_path: Path
     hr_spec_path: Path
+    qa_spec_path: Path
     reflector_model: str = "deepseek-flash"
     reflection_enabled: bool = True
     resilience_model: str = "deepseek-v4-pro"
+    opencode_model: str = "deepseek/deepseek-v4-pro"
+    qa_enabled: bool = True
+    qa_model: str = "deepseek-v4-pro"
     shell_enabled: bool = True
     allowed_commands: tuple[str, ...] = (
         "python",
@@ -104,6 +108,7 @@ class Settings:
             boss_spec_path=root_path / "agents" / "boss" / "profile.json",
             worker_spec_path=root_path / "agents" / "worker" / "profile.json",
             hr_spec_path=root_path / "agents" / "hr" / "profile.json",
+            qa_spec_path=root_path / "agents" / "qa" / "profile.json",
             reflector_model=os.getenv(
                 "ZURI_REFLECTOR_MODEL",
                 os.getenv("ZURI_WORKER_MODEL", "deepseek-flash"),
@@ -115,6 +120,16 @@ class Settings:
             resilience_model=os.getenv(
                 "ZURI_RESILIENCE_MODEL",
                 os.getenv("ZURI_BOSS_MODEL", "deepseek-v4-pro"),
+            ).strip(),
+            opencode_model=os.getenv(
+                "ZURI_OPENCODE_MODEL", "deepseek/deepseek-v4-pro"
+            ).strip(),
+            qa_enabled=os.getenv("ZURI_QA_ENABLED", "1")
+            .strip()
+            .lower()
+            not in {"0", "false", "no", "off"},
+            qa_model=os.getenv(
+                "ZURI_QA_MODEL", os.getenv("ZURI_BOSS_MODEL", "deepseek-v4-pro")
             ).strip(),
             shell_enabled=os.getenv("ZURI_SHELL_ENABLED", "1")
             .strip()

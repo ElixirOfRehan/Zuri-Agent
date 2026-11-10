@@ -12,6 +12,7 @@ from .models import (
     AgentSpec,
     Alternative,
     MemoryEntry,
+    QAReview,
     ReflectionResult,
     TaskContract,
     WorkerOutcome,
@@ -462,6 +463,87 @@ class DeepSeekLLM:
             tool_calls=tool_calls,
             error="budget exceeded: max_steps",
         )
+
+    def review_task(
+        self,
+        task_id: str,
+        contract: TaskContract,
+        assignee: AgentSpec,
+        qa_spec: AgentSpec,
+        artifacts: list[dict],
+        verifications: list[dict],
+        commands: list[dict],
+        contents: list[dict],
+        messages: list[dict],
+    ) -> QAReview:
+        model = self.settings.qa_model or self.settings.boss_model
+        payload = {
+            "task_id": task_id,
+            "contract": contract.model_dump(),
+            "assignee": {
+                "id": assignee.id,
+                "name": assignee.name,
+                "description": assignee.description,
+            },
+            "artifacts": [
+                {
+                    "path": item["path"],
+                    "sha256": item["sha256"],
+                    "bytes": item["bytes"],
+                }
+                for item in artifacts
+            ],
+            "contents": contents,
+            "verifications": [
+                {
+                    "name": item["name"],
+                    "passed": item["passed"],
+                    "detail": item["detail"],
+                }
+                for item in verifications
+            ],
+            "commands": commands,
+            "worker_messages": messages,
+        }
+        system = (
+            qa_spec.system_prompt.strip()
+            + "\n\nReturn ONLY JSON matching this schema:\n"
+            + json.dumps(QAReview.model_json_schema(), indent=2)
+        )
+        qa_messages: list[dict] = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": json.dumps(payload, indent=2, ensure_ascii=False),
+            },
+        ]
+        last_error = ""
+        for _attempt in range(2):
+            message = self._chat(
+                model=model,
+                messages=qa_messages,
+                agent="qa",
+                task_id=task_id,
+                response_format={"type": "json_object"},
+                temperature=0.1,
+            )
+            content = _strip_fences(message.content or "")
+            try:
+                return QAReview.model_validate(json.loads(content))
+            except (json.JSONDecodeError, ValidationError) as error:
+                last_error = str(error)
+                qa_messages = qa_messages + [
+                    {"role": "assistant", "content": content},
+                    {
+                        "role": "user",
+                        "content": (
+                            "That QA review is invalid: "
+                            + last_error
+                            + "\nReturn corrected JSON only."
+                        ),
+                    },
+                ]
+        raise ValueError(f"QA review failed validation: {last_error}")
 
     def plan_alternatives(
         self,

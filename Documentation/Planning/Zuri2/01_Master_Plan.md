@@ -357,12 +357,20 @@ Plan/details: `06_Slice1D_Company_Kernel.md`.
 
 ### Slice 2 — Engineering specialist
 
-Status: **partially implemented** — Engineering agent + shell tool layer.
-OpenCode integration, a separate QA reviewer, and parallel departments remain.
+Status: **implemented** — Engineering agent, tool layer, OpenCode delegation and
+QA reviewer. Parallel departments remain.
 
 REA/OpenCode integration for reverse engineering/coding, QA reviewer, second
 department, parallel workflows.
-Plan/details: `07_Slice2_Engineering_Tool_Layer.md`.
+Plan/details: `07_Slice2_Engineering_Tool_Layer.md`,
+`08_Slice2B_OpenCode_QA.md`.
+
+### Slice 2B — OpenCode delegation and QA
+
+Status: **implemented, awaiting user confirmation.**
+
+Controlled `run_opencode` tool and an advisory QA reviewer for engineering
+tasks. Details: `08_Slice2B_OpenCode_QA.md`.
 
 ### Slice 3 — Dashboard, memory and approvals UX
 

@@ -99,6 +99,36 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "run_opencode",
+            "description": (
+                "Delegate a coding change to OpenCode. It can read and edit files "
+                "in the workspace but cannot run shell or use the network. Use it "
+                "for substantial code edits, then inspect and test the result."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "Detailed coding instruction.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Optional provider/model; defaults to the configured model.",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 600,
+                    },
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "report_blocked",
             "description": (
                 "Report that the task cannot be completed and why. Use this "
@@ -132,8 +162,21 @@ TOOL_DEFINITIONS = [
 ]
 
 
-KNOWN_TOOLS = {"list_dir", "read_file", "write_file", "run_command"}
+KNOWN_TOOLS = {"list_dir", "read_file", "write_file", "run_command", "run_opencode"}
 CONTROL_TOOLS = {"report_blocked"}
+
+OPENCODE_PERMISSIONS = {
+    "$schema": "https://opencode.ai/config.json",
+    "permission": {
+        "edit": "allow",
+        "bash": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "external_directory": "deny",
+        "task": "deny",
+    },
+    "mcp": {"rea": {"enabled": False}},
+}
 
 GIT_BLOCKED = {"push", "pull", "fetch", "clone", "remote", "submodule"}
 NPM_BLOCKED = {"install", "publish", "exec", "ci", "link", "unpublish", "add"}
@@ -180,6 +223,8 @@ class ToolSet:
                 )
             if name == "run_command":
                 return self._run_command(arguments)
+            if name == "run_opencode":
+                return self._run_opencode(arguments)
             return json.dumps({"error": f"unknown tool: {name}"})
         except SandboxError as error:
             return json.dumps({"error": f"sandbox: {error}"})
@@ -327,6 +372,129 @@ class ToolSet:
         if program in {"python", "python3", "py", "pytest"}:
             return sys.executable
         return shutil.which(program)
+
+    def _run_opencode(self, arguments: dict) -> str:
+        if not self.settings.shell_enabled:
+            return json.dumps({"error": "shell/opencode is disabled"})
+        prompt = str(arguments.get("prompt", "")).strip()
+        if not prompt:
+            return json.dumps({"error": "prompt is empty"})
+        model = str(arguments.get("model") or self.settings.opencode_model).strip()
+        if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.:-]+$", model):
+            return json.dumps({"error": f"invalid model: {model}"})
+        executable = shutil.which("opencode")
+        if executable is None:
+            return json.dumps({"error": "opencode CLI not found on PATH"})
+        try:
+            timeout = int(arguments.get("timeout_seconds", 300))
+        except (TypeError, ValueError):
+            timeout = 300
+        timeout = max(1, min(600, timeout))
+        environment = os.environ.copy()
+        environment["OPENCODE_CONFIG_CONTENT"] = json.dumps(OPENCODE_PERMISSIONS)
+        environment["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
+        command = [
+            executable,
+            "run",
+            "--format",
+            "json",
+            "--model",
+            model,
+            "--dir",
+            str(self.settings.workspace_dir),
+            "--pure",
+            prompt,
+        ]
+        started = time.time()
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(self.settings.workspace_dir),
+                env=environment,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                shell=False,
+            )
+        except subprocess.TimeoutExpired:
+            return json.dumps({"error": f"opencode timed out after {timeout}s"})
+        except OSError as error:
+            return json.dumps({"error": f"opencode failed to start: {error}"})
+        duration = round(time.time() - started, 3)
+        text_parts: list[str] = []
+        errors: list[str] = []
+        session_id = None
+        cost = 0.0
+        input_tokens = 0
+        output_tokens = 0
+        for line in (completed.stdout or "").splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            session_id = event.get("sessionID") or session_id
+            part = event.get("part") or {}
+            if event.get("type") == "text":
+                text_parts.append(str(part.get("text", "")))
+            elif event.get("type") == "step_finish":
+                cost += float(part.get("cost") or 0)
+                tokens = part.get("tokens") or {}
+                input_tokens += int(tokens.get("input") or 0)
+                output_tokens += int(tokens.get("output") or 0)
+            elif event.get("type") == "error":
+                errors.append(json.dumps(event, ensure_ascii=False)[:1000])
+        text = "".join(text_parts).strip()
+        stderr = (completed.stderr or "")[:4000]
+        if completed.returncode != 0 or errors:
+            output = {
+                "error": "opencode failed",
+                "exit_code": completed.returncode,
+                "stderr": stderr,
+                "events": errors[:3],
+                "text": text[:4000],
+                "duration_seconds": duration,
+            }
+            self.storage.add_event(self.task_id, self.agent, "opencode_run", output)
+            return json.dumps(output)
+        if cost or input_tokens or output_tokens:
+            self.storage.add_cost(
+                self.task_id,
+                "opencode",
+                model,
+                input_tokens,
+                output_tokens,
+                cost,
+            )
+        event_data = {
+            "model": model,
+            "prompt_preview": prompt[:500],
+            "session_id": session_id,
+            "text": text[:4000],
+            "cost_usd": cost,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "exit_code": completed.returncode,
+            "duration_seconds": duration,
+            "stderr": stderr,
+        }
+        self.storage.add_event(self.task_id, self.agent, "opencode_run", event_data)
+        return json.dumps(
+            {
+                "text": text[:20000],
+                "cost_usd": cost,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "session_id": session_id,
+                "exit_code": completed.returncode,
+                "stderr": stderr,
+                "duration_seconds": duration,
+            }
+        )
 
     def _report_blocked(self, arguments: dict) -> str:
         reason = str(arguments.get("reason", "")).strip()

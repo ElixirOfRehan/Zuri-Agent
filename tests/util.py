@@ -19,4 +19,5 @@ def make_settings(root: Path) -> Settings:
         boss_spec_path=PROJECT_ROOT / "agents" / "boss" / "profile.json",
         worker_spec_path=PROJECT_ROOT / "agents" / "worker" / "profile.json",
         hr_spec_path=PROJECT_ROOT / "agents" / "hr" / "profile.json",
+        qa_spec_path=PROJECT_ROOT / "agents" / "qa" / "profile.json",
     )

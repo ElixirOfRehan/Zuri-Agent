@@ -7,9 +7,8 @@ actually done.
 **Core promise:** you can see every action and every artifact. No task succeeds
 because an AI said so; it succeeds only when the evidence matches the ledger.
 
-Status: **Slice 2 (Engineering + tool layer) implemented — awaiting user
-confirmation.** The local dashboard is available; OpenCode/QA/parallel work are
-later.
+Status: **Slice 2B (OpenCode + QA) implemented — awaiting user
+confirmation.** Parallel departments and UI polish remain.
 
 ## Web dashboard (local)
 
@@ -176,8 +175,28 @@ REA is available through the `rea` CLI from inside the workspace, for example
 `rea --version` or `rea inspect-android-package <relative-apk>` after copying a
 target into the workspace.
 
-OpenCode integration, a separate QA reviewer and parallel departments are later
-slices.
+## OpenCode and QA
+
+The Engineering agent can delegate substantial code edits to OpenCode through
+`run_opencode`:
+
+- OpenCode can read/edit workspace files only.
+- Shell, network, external directories, web search and subagents are denied.
+- REA MCP is disabled for the nested OpenCode run; the Engineering agent uses
+  `rea` itself.
+- The nested run is `--pure` and uses a controlled config.
+- Its token/cost usage is recorded in the Zuri cost ledger.
+
+After an engineering task passes the deterministic verifier, a QA reviewer
+checks the deliverables, command evidence and code/content:
+
+- verdict `pass` or `fail`,
+- concrete issues and notes,
+- stored in the task report, `zuri explain`, and dashboard,
+- **advisory**: it does not override the verifier or fake success.
+
+Disable QA with `ZURI_QA_ENABLED=0`. Configure models with
+`ZURI_OPENCODE_MODEL` and `ZURI_QA_MODEL`.
 
 ## What is recorded
 

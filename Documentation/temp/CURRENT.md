@@ -13,9 +13,8 @@
     success.
   - Specialists must be genuinely powerful (tools + SOPs + memory + checks).
   - Instagram was only an example; **not scheduled**.
-- Current step: **Slice 2 (Engineering + tool layer) implemented and internally
-  verified — awaiting user confirmation.** OpenCode/QA/parallel work are later.
-  Next: user choice of OpenCode/QA or UI polish.
+- Current step: **Slice 2B (OpenCode + QA) implemented and internally verified —
+  awaiting user confirmation.** Parallel departments and UI polish remain.
 - Slice 1A evidence (2026-11-09):
   - 29 automated tests pass.
   - HR created proposal `p_e5bd52ef05` → agent `notes` (write_file only).
@@ -116,6 +115,20 @@
   - Fixed Windows console encoding crash in `show --json` (UTF-8 output).
   - Security warning: not an OS sandbox; code runs with user permissions.
 - Next: choose OpenCode/QA or UI polish after confirmation.
+- Slice 2B implemented (2026-11-10):
+  - 93 automated tests pass.
+  - `run_opencode` tool: controlled OpenCode run (edit allow; bash/network/
+    external/websearch/task denied; REA MCP disabled; `--pure`), cost/tokens/
+    session captured in the Zuri ledger.
+  - QA reviewer seed + automatic advisory review after successful engineering
+    tasks (artifacts, contents, checks, command evidence); verdict/issues in
+    report, explain, dashboard. `ZURI_QA_ENABLED=0` disables.
+  - Live OpenCode: created `work/opencode.txt` (opencode works.) in 25s; cost
+    ~$0.006080; shell/network denied.
+  - Live QA: task `t_69bc923bf609` verdict pass; auto QA on
+    `t_419984968c39` pass; engineering mind updated.
+  - HR can grant run_opencode for code/test roles.
+- Next: UI polish or parallel departments after confirmation.
 - New requirements (2026-11-09):
   - **Dynamic agent mind:** create an agent with little detail; it builds a
     versioned profile/SOP/memory from verified work and user feedback. User can
@@ -171,10 +184,8 @@
 
 ## Next
 
-- Slice 2 is internally verified and awaiting user confirmation.
-- User can open `zuri.cmd serve` → `http://127.0.0.1:8765` and submit an
-  engineering request.
-- Then choose: (a) OpenCode integration + QA reviewer, or (b) UI polish.
+- Slice 2B is internally verified and awaiting user confirmation.
+- Then choose: (a) UI polish, or (b) parallel departments.
 - The user gives goals in chat; no command homework.
 - The assistant runs all tests and reports plain-language results.
 

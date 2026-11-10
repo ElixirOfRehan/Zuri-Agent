@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .sandbox import normalize_relative
 
-RESERVED_IDS = {"boss", "worker", "hr", "kernel", "verifier"}
+RESERVED_IDS = {"boss", "worker", "hr", "kernel", "verifier", "qa"}
 AGENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 
 STYLE_DEFAULTS = {
@@ -319,6 +319,19 @@ class ReflectionResult(BaseModel):
         cls, value: list[ReflectionSuggestion]
     ) -> list[ReflectionSuggestion]:
         return value[:3]
+
+
+class QAReview(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    verdict: Literal["pass", "fail"]
+    issues: list[str] = []
+    notes: list[str] = []
+
+    @field_validator("issues", "notes")
+    @classmethod
+    def _bounded(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in value if item.strip()][:10]
 
 
 @dataclass

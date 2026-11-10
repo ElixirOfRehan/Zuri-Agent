@@ -217,12 +217,26 @@ user is not expected to run commands or interpret raw logs.
 - [ ] per-command approval for risky commands
 - [ ] OS-level sandbox
 
+### OpenCode and QA (2B)
+- [x] OpenCode restricted permissions (edit only; shell/network denied)
+- [x] empty prompt and invalid model rejected
+- [x] live OpenCode edit with cost/token capture
+- [x] QA pass stored in report/explain
+- [x] QA fail is advisory, not a fake success
+- [x] QA error does not break success
+- [x] QA skipped for non-engineering agents
+- [x] QA can be disabled
+- [x] automatic QA on a live engineering task
+- [ ] QA with its own tools (current QA is read-only over evidence)
+- [ ] OpenCode session reuse
+- [ ] parallel departments
+
 ## Current status
 
-- 84 automated tests pass.
+- 93 automated tests pass.
 - Liar Test passes.
-- Live verified tasks through Slice 2; reflection, resilience, dashboard and the
-  engineering tool layer are live-tested.
+- Live verified tasks through Slice 2B; reflection, resilience, dashboard,
+  engineering tools, OpenCode delegation and QA are live-tested.
 
 ## Known limits
 

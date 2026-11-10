@@ -349,6 +349,37 @@ Live proof:
 
 Awaiting user confirmation of Slice 2; next choice OpenCode/QA vs UI polish.
 
+## 2026-11-10 — Slice 2B OpenCode + QA implemented (internal)
+
+Delivered:
+- `run_opencode` tool for Engineering:
+  - `opencode run --format json --model ... --dir <workspace> --pure`,
+  - controlled config: edit allow; bash/network/external/websearch/task deny;
+    REA MCP disabled; project config disabled,
+  - captures text/session/tokens/cost; records `opencode_run` evidence and adds
+    cost to the Zuri ledger.
+- QA reviewer (`qa` system profile, not assignable):
+  - reviews verified engineering tasks from artifacts, contents, checks,
+    command evidence and worker messages,
+  - returns verdict/issues/notes; stored as `qa_review`; shown in report,
+    explain, dashboard; advisory only.
+  - auto-runs after success for agents with `run_command`; disabled with
+    `ZURI_QA_ENABLED=0`; model configurable.
+- HR prompt can grant `run_opencode` for code/test roles.
+
+Live:
+- OpenCode created `work/opencode.txt` (`opencode works.`) in 25s; cost
+  ~$0.006080; restricted permissions; file verified.
+- QA review of `t_69bc923bf609`: pass with notes; report/explain updated.
+- Auto QA on `t_419984968c39`: pass; engineering mind updated.
+- 93 tests pass.
+
+Security: OpenCode edits workspace only; no shell/network; QA is read-only and
+advisory. Engineering run_command still runs with user permissions.
+
+Awaiting user confirmation of 2B; next choice UI polish vs parallel departments.
+
+
 
 
 

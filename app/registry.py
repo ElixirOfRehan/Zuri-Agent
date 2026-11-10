@@ -23,7 +23,7 @@ from .storage import Storage, utc_now
 from .tools import KNOWN_TOOLS
 
 ALLOWED_MODELS = {"deepseek-flash", "deepseek-v4-pro"}
-NON_ASSIGNABLE = {"boss", "hr", "kernel", "verifier"}
+NON_ASSIGNABLE = {"boss", "hr", "qa", "kernel", "verifier"}
 
 
 class AgentRegistry:

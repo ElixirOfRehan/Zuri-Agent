@@ -136,5 +136,6 @@ def test_engineering_agent_profile():
     spec = load_agent_spec(PROJECT_ROOT / "agents" / "engineering" / "profile.json")
     assert spec.id == "engineering"
     assert "run_command" in spec.tools
+    assert "run_opencode" in spec.tools
     assert "write_file" in spec.tools
     assert len(spec.system_prompt) > 100

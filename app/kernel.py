@@ -18,6 +18,7 @@ from .models import (
     TaskStatus,
 )
 from .policy import Policy
+from .qa import QAReviewer
 from .registry import ALLOWED_MODELS, NON_ASSIGNABLE, AgentRegistry
 from .storage import Storage, utc_now
 from .tools import KNOWN_TOOLS, ToolSet
@@ -61,8 +62,10 @@ class Kernel:
         self.llm = DeepSeekLLM(settings, self.storage)
         self.registry = AgentRegistry(settings, self.storage)
         self.reflector = Reflector(settings, self.storage, self.llm)
+        self.qa = QAReviewer(settings, self.storage, self.llm)
         self.verifier = Verifier(settings, self.storage)
         self.policy = Policy()
+        self._qa_spec: AgentSpec | None = None
         self._boss_agent: Boss | None = None
         self._hr_spec: AgentSpec | None = None
 
@@ -505,6 +508,16 @@ class Kernel:
     def _succeed(self, task_id: str) -> None:
         self._transition(task_id, TaskStatus.VERIFYING.value)
         self._transition(task_id, TaskStatus.SUCCEEDED.value)
+        if self.settings.qa_enabled:
+            try:
+                self.qa_review(task_id)
+            except Exception as error:  # noqa: BLE001 - QA is advisory
+                self.storage.add_event(
+                    task_id,
+                    "kernel",
+                    "qa_error",
+                    {"error": str(error)},
+                )
         if self.settings.reflection_enabled:
             try:
                 self.reflect_task(task_id)
@@ -516,6 +529,74 @@ class Kernel:
                     {"error": str(error)},
                 )
         self._save_report(task_id)
+
+    def _qa(self) -> AgentSpec:
+        if self._qa_spec is None:
+            spec = self.registry.get("qa")
+            if spec is None:
+                spec = load_agent_spec(self.settings.qa_spec_path)
+            self._qa_spec = spec
+        return self._qa_spec
+
+    def qa_review(self, task_id: str):
+        task = self.storage.get_task(task_id)
+        if task is None or task["status"] != TaskStatus.SUCCEEDED.value:
+            return None
+        if not task.get("contract_json"):
+            return None
+        contract = TaskContract.model_validate_json(task["contract_json"])
+        assignee = self.registry.get(contract.assignee)
+        if assignee is None or "run_command" not in assignee.tools:
+            return None
+        artifacts = self.storage.get_artifacts(task_id)
+        verifications = self.storage.get_verifications(task_id)
+        events = self.storage.get_events(task_id)
+        commands = [
+            event["data"]
+            for event in events
+            if event["type"] == "command_output"
+        ][-20:]
+        messages = [
+            event["data"]
+            for event in events
+            if event["type"] == "message"
+        ][-5:]
+        contents: list[dict] = []
+        budget = 24_000
+        for artifact in artifacts:
+            if budget <= 0:
+                break
+            target = self.settings.workspace_dir / artifact["path"]
+            if not target.is_file():
+                continue
+            try:
+                text = target.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            text = text[: min(8_000, budget)]
+            budget -= len(text)
+            contents.append(
+                {
+                    "path": artifact["path"],
+                    "sha256": artifact["sha256"],
+                    "text": text,
+                }
+            )
+        result = self.qa.review(
+            task_id,
+            contract,
+            assignee,
+            self._qa(),
+            artifacts,
+            verifications,
+            commands,
+            contents,
+            messages,
+        )
+        self.storage.add_event(
+            task_id, "qa", "qa_review", result.model_dump()
+        )
+        return result
 
     def _block_task(
         self,
@@ -769,6 +850,14 @@ class Kernel:
             ),
             None,
         )
+        qa_review = next(
+            (
+                event["data"]
+                for event in reversed(events)
+                if event["type"] == "qa_review"
+            ),
+            None,
+        )
         total_cost = self.storage.total_cost(task_id)
         total_tokens = self.storage.total_tokens(task_id)
 
@@ -913,6 +1002,15 @@ class Kernel:
             )
             lines.append("")
 
+        if qa_review:
+            lines.append("## QA")
+            lines.append(f"- Verdict: {qa_review.get('verdict', 'unknown')}")
+            for issue in qa_review.get("issues", []):
+                lines.append(f"- Issue: {issue}")
+            for note in qa_review.get("notes", []):
+                lines.append(f"- Note: {note}")
+            lines.append("")
+
         failed = [item["name"] for item in verifications if not item["passed"]]
         lines.append("## Boss report (kernel-verified)")
         if task["status"] == TaskStatus.SUCCEEDED.value:
@@ -920,6 +1018,13 @@ class Kernel:
                 f"Verified. All {len(verifications)} checks in the latest run "
                 "passed and every deliverable matches the ledger."
             )
+            if qa_review:
+                if qa_review.get("verdict") == "fail":
+                    lines.append(
+                        "QA flagged issues; review the QA section above."
+                    )
+                else:
+                    lines.append("QA: pass.")
         elif task["status"] == TaskStatus.BLOCKED.value:
             reason = (
                 resilience_end.get("reason") if resilience_end else "blocked"

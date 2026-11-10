@@ -394,6 +394,14 @@ def cmd_explain(args: argparse.Namespace) -> int:
             ),
             None,
         )
+        qa_review = next(
+            (
+                event["data"]
+                for event in reversed(data["events"])
+                if event["type"] == "qa_review"
+            ),
+            None,
+        )
         if mind_update:
             facts = mind_update.get("facts", 0)
             notes = mind_update.get("sop_notes", 0)
@@ -406,6 +414,12 @@ def cmd_explain(args: argparse.Namespace) -> int:
                 f"{'s' if suggestions != 1 else ''} "
                 f"(profile v{mind_update.get('version', '?')})."
             )
+        if qa_review:
+            print(
+                f"  - QA review: {qa_review.get('verdict', 'unknown')}."
+            )
+            for issue in qa_review.get("issues", []):
+                print(f"      QA issue: {issue}")
         print("")
         if task["status"] == "succeeded":
             print("Result: VERIFIED.")
