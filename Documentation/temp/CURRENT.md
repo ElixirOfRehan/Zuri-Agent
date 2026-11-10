@@ -32,6 +32,18 @@
   - Added simple commands: `last`, `verify-last`, `guide`, `ping`; clearer
     two-step delete prompts; restore reports "still active" instead of ERROR.
   - 29 tests pass.
+  - User test 2026-11-10: `t_76272e742abb` succeeded ("Create notes/hello.md
+    with 'hello'"), assignee worker, 3/3 checks, ~$0.001440; `last` and
+    `verify-last` worked. **1A confirmed.**
+  - Understanding layer added after user feedback:
+    - `zuri explain` / `zuri explain <id>`: plain-language story of what
+      happened, who did it, checks, evidence, cost. No raw JSON, no task-id
+      copying.
+    - `zuri last`, `verify-last`, `guide`, `ping`.
+    - Test strategy: `Documentation/Planning/Zuri2/05_Test_Strategy.md`.
+    - 44 tests pass; failed-task explain shows the error (`Connection error.`);
+      Liar Test still passes; `zuri ping` OK.
+  - The assistant owns testing from now on; the user does not run test commands.
 - Slice 1A plan:
   `Documentation/Planning/Zuri2/02_Slice1A_Agent_Lifecycle.md`
   - Folder layout: `agents/<id>/profile.json`, `memory.jsonl`, `profiles/`.
@@ -95,18 +107,12 @@
 
 ## Next
 
-- User test Slice 1A with the simple path:
-  1. `zuri.cmd guide`
-  2. `zuri.cmd run "Create notes/hello.md with the text 'hello'"`
-  3. `zuri.cmd last`
-  4. `zuri.cmd verify-last`
-  5. `zuri.cmd agent list` / `agent show notes`
-  6. Deletion test: `agent delete notes` → wrong input aborts; repeat with
-     `notes` then `DELETE notes`; `agent restore notes`.
-- If the API fails with `Connection error`, run `zuri.cmd ping` and retry.
-- After user confirms 1A: implement 1B (Agent Mind), then 1C (Resilience), then
-  1D (Company kernel).
-- Do not implement 1B before confirmation.
+- Start Slice 1B (Agent Mind) internally. The assistant owns all testing and
+  will report plain-language results; the user does not run test commands.
+- 1B scope: versioned profile/SOP/memory, reflection only after verified tasks,
+  configurable Boss/agent style, memory viewer, rollback.
+- After 1B: 1C Resilience, 1D Company kernel/dashboard, then the chat UI.
+- The user gives goals in chat; no command homework.
 
 ## Open questions
 

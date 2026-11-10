@@ -24,6 +24,7 @@ Inspect a task:
 ```powershell
 .\zuri.cmd tasks
 .\zuri.cmd last            # short summary of the newest task
+.\zuri.cmd explain         # plain-language explanation of the newest task
 .\zuri.cmd verify-last     # re-run checks on the newest task
 .\zuri.cmd show <task-id>
 .\zuri.cmd show <task-id> --json
@@ -136,3 +137,4 @@ can set `case_sensitive: true` when exact case matters.
 - Slice 1A: `Documentation/Planning/Zuri2/02_Slice1A_Agent_Lifecycle.md`
 - Agent Mind: `Documentation/Planning/Zuri2/03_Slice1B_Agent_Mind.md`
 - Resilience: `Documentation/Planning/Zuri2/04_Slice1C_Resilience.md`
+- Test strategy: `Documentation/Planning/Zuri2/05_Test_Strategy.md`

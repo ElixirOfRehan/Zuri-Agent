@@ -222,6 +222,120 @@ def cmd_last(args: argparse.Namespace) -> int:
         kernel.close()
 
 
+def cmd_explain(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        if args.task_id:
+            task = kernel.storage.get_task(args.task_id)
+        else:
+            tasks = kernel.storage.list_tasks(1)
+            task = kernel.storage.get_task(tasks[0]["id"]) if tasks else None
+        if task is None:
+            print("No task to explain yet.")
+            return 0
+        data = kernel.task_data(task["id"])
+        contract = data["contract"]
+        checks = data["verifications"]
+        error = next(
+            (
+                event["data"].get("error")
+                for event in reversed(data["events"])
+                if event["type"] == "error" and event["data"].get("error")
+            ),
+            None,
+        )
+
+        print(f"Task: {task['id']}")
+        print(f"You asked: {task['request']}")
+        print("")
+        if contract:
+            spec = kernel.registry.get(contract["assignee"])
+            who = contract["assignee"]
+            if spec:
+                who += f" ({spec.name})"
+            print(f"The Boss assigned it to: {who}")
+            print("")
+            print("The Boss planned:")
+            print(f"  Goal: {contract['objective']}")
+            print("  Deliverable(s):")
+            for item in contract["deliverables"]:
+                print(f"    - {item['path']}")
+            print("  Checks:")
+            for item in contract["acceptance_tests"]:
+                if item["type"] == "file_contains":
+                    detail = f"contains {item.get('text')!r}"
+                elif item["type"] == "file_not_empty":
+                    detail = "is not empty"
+                else:
+                    detail = "exists"
+                print(f"    - {item['path']} {detail}")
+        else:
+            print("The Boss could not create a valid plan.")
+        print("")
+        print("What happened:")
+        tool_events = [
+            event for event in data["events"] if event["type"] == "tool_call"
+        ]
+        if tool_events:
+            for event in tool_events:
+                payload = event["data"]
+                arguments = payload.get("arguments", {})
+                target = arguments.get("path") or arguments.get("name") or ""
+                print(
+                    f"  - The worker used {payload.get('name')} on {target or 'the workspace'}."
+                )
+        else:
+            print("  - The worker did not use any tools.")
+        if data["artifacts"]:
+            print("  - Files recorded as evidence:")
+            for artifact in data["artifacts"]:
+                print(
+                    f"      {artifact['path']} "
+                    f"({artifact['bytes']} bytes, sha256 {artifact['sha256'][:12]}...)"
+                )
+        else:
+            print("  - No files were recorded.")
+        if checks:
+            passed = sum(1 for item in checks if item["passed"])
+            print(f"  - The independent verifier ran {len(checks)} checks: "
+                  f"{passed} passed, {len(checks) - passed} failed.")
+            for item in checks:
+                if not item["passed"]:
+                    print(f"      FAIL: {item['name']} - {item['detail']}")
+        else:
+            print("  - No verification ran.")
+        if error:
+            print(f"  - Error: {error}")
+        print("")
+        if task["status"] == "succeeded":
+            print("Result: VERIFIED.")
+            print(
+                "This means the file exists, it matches the fingerprint recorded "
+                "when it was written, and every acceptance check passed."
+            )
+        elif task["status"] == "awaiting_approval":
+            print("Result: waiting for your approval before any work starts.")
+        else:
+            print("Result: NOT VERIFIED.")
+            print(
+                "This means the system did not accept the work. Read the failed "
+                "checks or error above; nothing was silently marked successful."
+            )
+        print("")
+        print(
+            f"Cost: {data['total_tokens']} tokens, "
+            f"${data['total_cost_usd']:.6f} (estimated)."
+        )
+        print(
+            "You can ask me to explain a task, re-check it, or show the raw "
+            "timeline. You do not need to copy command ids."
+        )
+        return 0
+    finally:
+        kernel.close()
+
+
 def cmd_verify_last(args: argparse.Namespace) -> int:
     settings = Settings.load()
     kernel = Kernel(settings)
@@ -250,7 +364,8 @@ def cmd_guide(args: argparse.Namespace) -> int:
     print("2. Run a safe task:     zuri.cmd run \"Create notes/hello.md with the text 'hello'\"")
     print("3. See the last result: zuri.cmd last")
     print("4. Re-check it:         zuri.cmd verify-last")
-    print("5. Full raw timeline:   zuri.cmd show <task-id>")
+    print("5. Explain it simply:   zuri.cmd explain")
+    print("6. Full raw timeline:   zuri.cmd show <task-id>")
     print("")
     print("Create an agent:")
     print("  zuri.cmd agent create \"Create an agent named Notes that writes markdown.\"")
@@ -559,6 +674,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     last = sub.add_parser("last", help="Show a short summary of the latest task")
     last.set_defaults(func=cmd_last)
+
+    explain = sub.add_parser(
+        "explain", help="Explain a task in plain language"
+    )
+    explain.add_argument("task_id", nargs="?")
+    explain.set_defaults(func=cmd_explain)
 
     verify_last = sub.add_parser("verify-last", help="Re-run checks on the latest task")
     verify_last.set_defaults(func=cmd_verify_last)

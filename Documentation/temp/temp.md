@@ -208,6 +208,45 @@ GitHub:
 - Remote: initial `76f278c`, docs `304b9bd`.
 - `.env`, `data/`, `workspace/` contents, agent memory and trash are ignored.
 
+## 2026-11-10 — User 1A test passed
+
+User ran the simple path:
+- `zuri.cmd guide`
+- `zuri.cmd run "Create notes/hello.md with the text 'hello'"` →
+  `t_76272e742abb` succeeded; assignee `worker`; 3/3 checks; ~$0.001440.
+- `zuri.cmd last` and `zuri.cmd verify-last` both worked.
+
+Slice 1A is verified on the user's machine. Awaiting explicit "confirm 1A"
+before starting 1B (Agent Mind).
+
+## 2026-11-10 — 1A confirmed; understanding + test ownership
+
+User confirmed 1A but said they do not understand what is happening from
+command output and do not want command homework. They want a chat-like
+experience eventually; for now, build internals and own all testing.
+
+Added:
+- `zuri explain` / `zuri explain <id>`: plain-language story of the task:
+  request, assignee, plan, tools used, files/evidence, checks, result, cost.
+  No raw JSON, no task-id copying needed.
+- `zuri guide` now includes explain.
+- Test strategy: `Documentation/Planning/Zuri2/05_Test_Strategy.md` with unit,
+  integration, adversarial, live, regression, observability layers and an
+  edge-case matrix.
+- `tests/test_edge_cases.py`: 15 additional adversarial tests (missing/
+  tampered/empty files, Unicode case, verification runs, registry errors,
+  invalid ids/models/tools, path escape, cost, redaction, multiple restores,
+  planner failure).
+- 44 tests pass. Liar Test passes. `zuri ping` OK.
+- Failed task `t_a5bc72636dbb` explain shows `Connection error.`; retry task
+  `t_cdf1b1b8cc6c` succeeded.
+- The assistant owns testing from now on; the user gives goals and reads the
+  plain-language result. The chat UI comes after the internals.
+
+Next: implement Slice 1B (Agent Mind) internally.
+
+
+
 
 
 
