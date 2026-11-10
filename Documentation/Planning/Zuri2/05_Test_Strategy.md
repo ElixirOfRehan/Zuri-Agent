@@ -83,6 +83,25 @@ user is not expected to run commands or interpret raw logs.
 - [ ] restore when multiple snapshots exist with same id
 - [ ] profile mutation by the agent itself (must be blocked)
 
+### Agent mind (1B)
+- [x] style defaults and validation
+- [x] profile version snapshot on update
+- [x] rollback creates a new version
+- [x] user remember/forget memory
+- [x] memory evidence validation
+- [x] pending tool/model/style/scope/prompt changes
+- [x] approve/reject pending changes
+- [x] duplicate pending changes reused
+- [x] reflection only after verified tasks
+- [x] reflection failure does not undo success
+- [x] sensitive style changes become pending, not auto-applied
+- [x] trivial "task completed" facts rejected
+- [x] near-duplicate SOP notes suppressed
+- [x] style/SOP/memory injected into worker prompt
+- [x] Boss style/notes injected into planning prompt
+- [ ] reflection prompt injection from file content
+- [ ] memory cap/compaction over hundreds of tasks
+
 ### Kernel and assignment
 - [x] Boss gets the assignee list
 - [x] unknown assignee rejected
@@ -149,6 +168,13 @@ user is not expected to run commands or interpret raw logs.
 6. The assistant reports: what changed, test counts, task ids, cost, failures,
    and known limitations. The user is not asked to run test commands.
 7. Git commit + push (when the repo is configured).
+
+## Current status
+
+- 58 automated tests pass.
+- Liar Test passes.
+- Live verified tasks through Slice 1B; reflection adds evidence-backed
+  lessons only from verified work.
 
 ## Known limits
 

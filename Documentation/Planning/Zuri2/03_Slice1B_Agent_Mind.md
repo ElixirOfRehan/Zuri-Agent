@@ -1,6 +1,6 @@
 # Slice 1B — Agent Mind v1
 
-Status: planned; starts only after Slice 1A is confirmed.
+Status: **implemented 2026-11-10 — awaiting user confirmation**
 Depends on: 1A (folder-based agent storage).
 
 ## 1. Goal

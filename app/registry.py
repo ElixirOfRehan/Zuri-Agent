@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import uuid
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from .config import Settings
-from .models import RESERVED_IDS, AgentProposal, AgentSpec
+from .models import (
+    RESERVED_IDS,
+    AgentChange,
+    AgentProposal,
+    AgentSpec,
+    MemoryEntry,
+    effective_style,
+    validate_style,
+)
 from .sandbox import write_atomic
 from .storage import Storage, utc_now
 from .tools import KNOWN_TOOLS
@@ -32,6 +42,15 @@ class AgentRegistry:
     # ----- paths and json -------------------------------------------------
     def _profile_path(self, agent_id: str) -> Path:
         return self.agents_dir / agent_id / "profile.json"
+
+    def _profiles_dir(self, agent_id: str) -> Path:
+        return self.agents_dir / agent_id / "profiles"
+
+    def _memory_path(self, agent_id: str) -> Path:
+        return self.agents_dir / agent_id / "memory.jsonl"
+
+    def _changes_path(self, agent_id: str) -> Path:
+        return self.agents_dir / agent_id / "pending_changes.json"
 
     @staticmethod
     def _dump(data: dict | AgentSpec) -> bytes:
@@ -294,5 +313,381 @@ class AgentRegistry:
     def history(self, agent_id: str, limit: int = 100) -> list[dict]:
         return self.storage.get_agent_events(agent_id, limit)
 
+    # ----- mind: profile versions -----------------------------------------
+    def list_versions(self, agent_id: str) -> list[int]:
+        versions: list[int] = []
+        for path in self._profiles_dir(agent_id).glob("v*.json"):
+            try:
+                versions.append(int(path.stem[1:]))
+            except ValueError:
+                continue
+        return sorted(versions)
+
+    def update_profile(
+        self,
+        agent_id: str,
+        *,
+        style: dict | None = None,
+        sop_notes_append: list[str] | None = None,
+        tools: list[str] | None = None,
+        model: str | None = None,
+        system_prompt: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+        reason: str,
+        evidence: list[str] | None = None,
+        actor: str = "user",
+    ) -> AgentSpec:
+        current = self.get(agent_id)
+        if current is None:
+            raise ValueError(f"agent not found: {agent_id}")
+        updates: dict = {}
+        changed: list[str] = []
+        if style is not None:
+            merged = {**current.style, **validate_style(style)}
+            if effective_style(merged) != current.effective_style():
+                updates["style"] = merged
+                changed.append("style")
+        if sop_notes_append:
+            notes = list(current.sop_notes)
+            for note in sop_notes_append:
+                text = note.strip()
+                if (
+                    text
+                    and len(text) <= 500
+                    and not any(
+                        self._similar_note(text, existing) for existing in notes
+                    )
+                ):
+                    notes.append(text)
+            if notes != current.sop_notes:
+                updates["sop_notes"] = notes[:50]
+                changed.append("sop_notes")
+        if tools is not None:
+            unknown = set(tools) - KNOWN_TOOLS
+            if unknown:
+                raise ValueError(f"unknown tools: {', '.join(sorted(unknown))}")
+            if not tools:
+                raise ValueError("an agent needs at least one tool")
+            if tools != current.tools:
+                updates["tools"] = tools
+                changed.append("tools")
+        if model is not None:
+            if model not in ALLOWED_MODELS:
+                raise ValueError(
+                    f"model must be one of: {', '.join(sorted(ALLOWED_MODELS))}"
+                )
+            if model != current.model:
+                updates["model"] = model
+                changed.append("model")
+        if system_prompt is not None:
+            text = system_prompt.strip()
+            if len(text) < 20:
+                raise ValueError("system_prompt is too short")
+            if text != current.system_prompt:
+                updates["system_prompt"] = text
+                changed.append("system_prompt")
+        if name is not None and name.strip() != current.name:
+            updates["name"] = name.strip()
+            changed.append("name")
+        if description is not None and description.strip() != current.description:
+            updates["description"] = description.strip()
+            changed.append("description")
+        if not updates:
+            return current
+        updates["version"] = current.version + 1
+        updates["updated_at"] = utc_now()
+        updated = AgentSpec.model_validate({**current.model_dump(), **updates})
+        self._write_profile(updated)
+        self._write_json(
+            self._profiles_dir(agent_id) / f"v{updated.version:04d}.json",
+            updated.model_dump(),
+        )
+        self._audit(
+            agent_id,
+            "profile_updated",
+            {
+                "version": updated.version,
+                "changed": changed,
+                "reason": reason,
+                "evidence": evidence or [],
+                "actor": actor,
+            },
+        )
+        return updated
+
+    def rollback_profile(self, agent_id: str, version: int) -> AgentSpec:
+        current = self.get(agent_id)
+        if current is None:
+            raise ValueError(f"agent not found: {agent_id}")
+        snapshot = self._profiles_dir(agent_id) / f"v{version:04d}.json"
+        if not snapshot.exists():
+            raise ValueError(f"profile version not found: {version}")
+        with open(snapshot, "r", encoding="utf-8") as handle:
+            old = AgentSpec.model_validate(json.load(handle))
+        updated = AgentSpec.model_validate(
+            {
+                **old.model_dump(),
+                "version": current.version + 1,
+                "updated_at": utc_now(),
+            }
+        )
+        self._write_profile(updated)
+        self._write_json(
+            self._profiles_dir(agent_id) / f"v{updated.version:04d}.json",
+            updated.model_dump(),
+        )
+        self._audit(
+            agent_id,
+            "profile_rolled_back",
+            {
+                "from_version": version,
+                "new_version": updated.version,
+            },
+        )
+        return updated
+
+    # ----- mind: memory ----------------------------------------------------
+    def load_memory(
+        self, agent_id: str, include_forgotten: bool = False
+    ) -> list[MemoryEntry]:
+        path = self._memory_path(agent_id)
+        if not path.exists():
+            return []
+        entries: list[MemoryEntry] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = MemoryEntry.model_validate_json(line)
+            except Exception:
+                continue
+            if include_forgotten or entry.status == "active":
+                entries.append(entry)
+        return entries
+
+    def append_memory(self, agent_id: str, entries: list[MemoryEntry]) -> list[MemoryEntry]:
+        if not entries:
+            return []
+        if self.get(agent_id) is None:
+            raise ValueError(f"agent not found: {agent_id}")
+        path = self._memory_path(agent_id)
+        with open(path, "a", encoding="utf-8") as handle:
+            for entry in entries:
+                handle.write(entry.model_dump_json() + "\n")
+        self._audit(
+            agent_id,
+            "memory_added",
+            {"count": len(entries), "ids": [entry.id for entry in entries]},
+        )
+        return entries
+
+    def remember_user_fact(self, agent_id: str, text: str) -> MemoryEntry:
+        entry = MemoryEntry(
+            id="m_" + uuid.uuid4().hex[:10],
+            ts=utc_now(),
+            kind="user_fact",
+            text=text,
+            evidence=["user"],
+            created_by="user",
+        )
+        self.append_memory(agent_id, [entry])
+        return entry
+
+    def forget_memory(self, agent_id: str, memory_id: str) -> MemoryEntry:
+        path = self._memory_path(agent_id)
+        entries = []
+        target: MemoryEntry | None = None
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    entry = MemoryEntry.model_validate_json(line)
+                except Exception:
+                    continue
+                if entry.id == memory_id:
+                    entry = entry.model_copy(update={"status": "forgotten"})
+                    target = entry
+                entries.append(entry)
+        if target is None:
+            raise ValueError(f"memory entry not found: {memory_id}")
+        write_atomic(
+            path,
+            "".join(entry.model_dump_json() + "\n" for entry in entries).encode(
+                "utf-8"
+            ),
+        )
+        self._audit(
+            agent_id, "memory_forgotten", {"memory_id": memory_id}
+        )
+        return target
+
+    # ----- mind: pending changes ------------------------------------------
+    def _load_changes(self, agent_id: str) -> list[AgentChange]:
+        path = self._changes_path(agent_id)
+        if not path.exists():
+            return []
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return [AgentChange.model_validate(item) for item in data]
+
+    def _save_changes(self, agent_id: str, changes: list[AgentChange]) -> None:
+        self._write_json(
+            self._changes_path(agent_id),
+            [change.model_dump() for change in changes],
+        )
+
+    def add_change(
+        self,
+        agent_id: str,
+        *,
+        kind: str,
+        proposed: str,
+        reason: str = "",
+        evidence: list[str] | None = None,
+    ) -> AgentChange:
+        if self.get(agent_id) is None:
+            raise ValueError(f"agent not found: {agent_id}")
+        if kind not in {"tools", "model", "scope", "system_prompt", "style"}:
+            raise ValueError(f"unknown change kind: {kind}")
+        change = AgentChange(
+            change_id="c_" + uuid.uuid4().hex[:10],
+            agent_id=agent_id,
+            kind=kind,
+            proposed=proposed,
+            reason=reason,
+            evidence=evidence or [],
+            created_at=utc_now(),
+        )
+        changes = self._load_changes(agent_id)
+        for existing in changes:
+            if (
+                existing.status == "pending"
+                and existing.kind == kind
+                and existing.proposed == proposed
+            ):
+                return existing
+        changes.append(change)
+        self._save_changes(agent_id, changes)
+        self._audit(
+            agent_id,
+            "change_proposed",
+            {"change_id": change.change_id, "kind": kind, "reason": reason},
+        )
+        return change
+
+    def list_changes(
+        self, agent_id: str, status: str | None = "pending"
+    ) -> list[AgentChange]:
+        changes = self._load_changes(agent_id)
+        if status is None:
+            return changes
+        return [change for change in changes if change.status == status]
+
+    def approve_change(self, agent_id: str, change_id: str) -> AgentChange:
+        changes = self._load_changes(agent_id)
+        selected = next(
+            (change for change in changes if change.change_id == change_id), None
+        )
+        if selected is None:
+            raise ValueError(f"change not found: {change_id}")
+        if selected.status != "pending":
+            raise ValueError(f"change is not pending: {selected.status}")
+        if selected.kind == "tools":
+            raw = selected.proposed.strip()
+            if raw.startswith("["):
+                tools = json.loads(raw)
+            else:
+                tools = [item.strip() for item in raw.split(",") if item.strip()]
+            self.update_profile(
+                agent_id,
+                tools=tools,
+                reason=selected.reason or "approved tool change",
+                evidence=selected.evidence,
+                actor="user",
+            )
+        elif selected.kind == "model":
+            self.update_profile(
+                agent_id,
+                model=selected.proposed.strip(),
+                reason=selected.reason or "approved model change",
+                evidence=selected.evidence,
+                actor="user",
+            )
+        elif selected.kind == "system_prompt":
+            self.update_profile(
+                agent_id,
+                system_prompt=selected.proposed,
+                reason=selected.reason or "approved prompt change",
+                evidence=selected.evidence,
+                actor="user",
+            )
+        elif selected.kind == "scope":
+            self.update_profile(
+                agent_id,
+                sop_notes_append=[f"Scope: {selected.proposed.strip()}"],
+                reason=selected.reason or "approved scope change",
+                evidence=selected.evidence,
+                actor="user",
+            )
+        elif selected.kind == "style":
+            try:
+                style = json.loads(selected.proposed)
+            except json.JSONDecodeError as error:
+                raise ValueError(f"style change is not valid JSON: {error}") from error
+            self.update_profile(
+                agent_id,
+                style=style,
+                reason=selected.reason or "approved style change",
+                evidence=selected.evidence,
+                actor="user",
+            )
+        updated = selected.model_copy(update={"status": "approved"})
+        changes = [
+            updated if change.change_id == change_id else change
+            for change in changes
+        ]
+        self._save_changes(agent_id, changes)
+        self._audit(
+            agent_id,
+            "change_approved",
+            {"change_id": change_id, "kind": selected.kind},
+        )
+        return updated
+
+    def reject_change(self, agent_id: str, change_id: str) -> AgentChange:
+        changes = self._load_changes(agent_id)
+        selected = next(
+            (change for change in changes if change.change_id == change_id), None
+        )
+        if selected is None:
+            raise ValueError(f"change not found: {change_id}")
+        if selected.status != "pending":
+            raise ValueError(f"change is not pending: {selected.status}")
+        updated = selected.model_copy(update={"status": "rejected"})
+        changes = [
+            updated if change.change_id == change_id else change
+            for change in changes
+        ]
+        self._save_changes(agent_id, changes)
+        self._audit(
+            agent_id,
+            "change_rejected",
+            {"change_id": change_id, "kind": selected.kind},
+        )
+        return updated
+
     def _audit(self, agent_id: str, action: str, data: dict) -> None:
         self.storage.add_agent_event(agent_id, action, data)
+
+    @staticmethod
+    def _similar_note(left: str, right: str) -> bool:
+        def normalize(value: str) -> str:
+            return re.sub(r"[^a-z0-9 ]+", " ", value.casefold()).strip()
+
+        a = normalize(left)
+        b = normalize(right)
+        if not a or not b:
+            return a == b
+        return SequenceMatcher(None, a, b).ratio() >= 0.8

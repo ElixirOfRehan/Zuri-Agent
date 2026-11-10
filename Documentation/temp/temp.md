@@ -219,6 +219,47 @@ User ran the simple path:
 Slice 1A is verified on the user's machine. Awaiting explicit "confirm 1A"
 before starting 1B (Agent Mind).
 
+## 2026-11-10 — Slice 1B implemented (internal)
+
+Scope delivered:
+- `AgentSpec` style defaults/validation, `sop_notes`, versioned profile.
+- `AgentRegistry`: `update_profile`, `rollback_profile`, `list_versions`,
+  memory `load/append/remember/forget`, pending changes `add/list/approve/reject`.
+- `MemoryEntry`, `AgentChange`, `ReflectionResult` models.
+- `DeepSeekLLM.reflect` + `Reflector`; reflection runs only after a verified
+  task and never changes task success.
+- Prompt context now includes style, SOP notes and active memory for workers;
+  Boss prompt includes its style/notes.
+- CLI: `agent mind/remember/forget/style/rollback/changes/approve-change/
+  reject-change`; `zuri explain` shows learning summary.
+- Reflection safe fields auto-apply (tone/length/language/report_format/SOP
+  notes/facts). Sensitive fields (tools/model/scope/system_prompt/risk/
+  initiative/approval) become pending changes.
+- Facts require evidence from the task/artifacts/checks.
+- Trivial "task completed" facts are rejected; near-duplicate SOP notes are
+  suppressed; duplicate pending changes are reused.
+
+Bugs found and fixed during testing:
+1. Reflection auto-applied `approval=balanced` and `initiative=act`; now
+   sensitive style becomes a pending change. Live task `t_9154c52019c9`
+   confirmed the pending change and no auto-apply.
+2. Reflection wrote trivial "task completed" facts; now filtered. Live task
+   `t_fdb37ee10075` added only a useful lesson.
+3. Near-duplicate SOP notes; now similarity check (>=0.8) suppresses them.
+4. Windows `os.replace` PermissionError on memory rewrite; atomic write now
+   retries and falls back to in-place write.
+5. Workers did not see style/memory; now injected into prompts.
+
+Verification:
+- 58 tests pass.
+- Live verified tasks: `t_afe545433cd1`, `t_9154c52019c9`, `t_235d6dc2a23a`,
+  `t_fdb37ee10075`.
+- Style/remember/forget/rollback/changes/reject-change tested live.
+- Liar Test still passes; API ping OK.
+
+Awaiting user confirmation of 1B before 1C.
+
+
 ## 2026-11-10 — 1A confirmed; understanding + test ownership
 
 User confirmed 1A but said they do not understand what is happening from

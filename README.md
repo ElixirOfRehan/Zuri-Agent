@@ -7,7 +7,8 @@ actually done.
 **Core promise:** you can see every action and every artifact. No task succeeds
 because an AI said so; it succeeds only when the evidence matches the ledger.
 
-Status: **Slice 1A implemented — awaiting user test.** No later slice started.
+Status: **Slice 1B implemented — awaiting user confirmation.** No later slice
+started.
 
 ## Quick start
 
@@ -85,6 +86,27 @@ Other agent commands:
 .\zuri.cmd agent history notes
 .\zuri.cmd agent reject <proposal-id>
 ```
+
+## Agent mind
+
+Each agent has a versioned mind:
+
+```powershell
+.\zuri.cmd agent mind notes
+.\zuri.cmd agent style notes tone=direct length=short
+.\zuri.cmd agent remember notes "User prefers short checklists."
+.\zuri.cmd agent forget notes <memory-id>
+.\zuri.cmd agent rollback notes 1
+.\zuri.cmd agent changes notes
+.\zuri.cmd agent approve-change notes <change-id>
+.\zuri.cmd agent reject-change notes <change-id>
+```
+
+After a task is independently verified, the agent reflects on it. Safe changes
+(tone, length, language, report format, SOP notes, evidence-backed facts) apply
+automatically and create a new profile version. Sensitive changes (tools,
+model, scope, system prompt, risk, initiative, approval policy) become **pending
+changes** that need your approval.
 
 Each agent gets only the tools in its profile. System agents (`boss`, `hr`,
 `worker`) cannot be deleted or re-created by the user.

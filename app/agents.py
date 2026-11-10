@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from .llm import DeepSeekLLM
-from .models import AgentSpec, TaskContract, WorkerOutcome
+from .models import AgentSpec, MemoryEntry, TaskContract, WorkerOutcome
 from .storage import Storage
 from .tools import ToolSet
 
@@ -24,12 +24,20 @@ class Boss:
 
 
 class LLMWorker:
-    def __init__(self, spec: AgentSpec, llm: DeepSeekLLM):
+    def __init__(
+        self,
+        spec: AgentSpec,
+        llm: DeepSeekLLM,
+        memory: list[MemoryEntry] | None = None,
+    ):
         self.spec = spec
         self.llm = llm
+        self.memory = memory or []
 
     def run(self, contract: TaskContract, toolset: ToolSet, task_id: str) -> WorkerOutcome:
-        return self.llm.run_worker(contract, self.spec, toolset, task_id)
+        return self.llm.run_worker(
+            contract, self.spec, toolset, task_id, memory=self.memory
+        )
 
 
 class LiarWorker:

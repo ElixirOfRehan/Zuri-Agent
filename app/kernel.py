@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import re
+import uuid
 
 from .agents import Boss, LLMWorker, LiarWorker, load_agent_spec
 from .config import Settings
 from .llm import DeepSeekLLM
+from .mind import Reflector
 from .models import (
     AcceptanceTest,
     AgentProposal,
     AgentSpec,
     Deliverable,
+    MemoryEntry,
     TaskContract,
     TaskStatus,
 )
 from .registry import ALLOWED_MODELS, NON_ASSIGNABLE, AgentRegistry
-from .storage import Storage
+from .storage import Storage, utc_now
 from .tools import KNOWN_TOOLS, ToolSet
 from .verifier import Verifier
 
@@ -46,6 +49,7 @@ class Kernel:
         self.storage = Storage(settings)
         self.llm = DeepSeekLLM(settings, self.storage)
         self.registry = AgentRegistry(settings, self.storage)
+        self.reflector = Reflector(settings, self.storage, self.llm)
         self.verifier = Verifier(settings, self.storage)
         self._boss_agent: Boss | None = None
         self._hr_spec: AgentSpec | None = None
@@ -216,7 +220,8 @@ class Kernel:
         else:
             if worker_spec is None:
                 raise ValueError("no worker spec for LLM execution")
-            worker = LLMWorker(worker_spec, self.llm)
+            memory = self.registry.load_memory(worker_spec.id)
+            worker = LLMWorker(worker_spec, self.llm, memory=memory)
         outcome = worker.run(contract, toolset, task_id)
         if outcome.error:
             self.storage.add_event(
@@ -232,7 +237,150 @@ class Kernel:
             task_id,
             TaskStatus.SUCCEEDED.value if success else TaskStatus.FAILED.value,
         )
+        if success and self.settings.reflection_enabled:
+            try:
+                self.reflect_task(task_id)
+            except Exception as error:  # noqa: BLE001 - reflection must not undo success
+                self.storage.add_event(
+                    task_id,
+                    "kernel",
+                    "reflection_error",
+                    {"error": str(error)},
+                )
         self._save_report(task_id)
+
+    def reflect_task(self, task_id: str) -> dict:
+        task = self.storage.get_task(task_id)
+        if task is None or task["status"] != TaskStatus.SUCCEEDED.value:
+            return {"skipped": "task is not succeeded"}
+        if not task.get("contract_json"):
+            return {"skipped": "no contract"}
+        contract = TaskContract.model_validate_json(task["contract_json"])
+        profile = self.registry.get(contract.assignee)
+        if profile is None:
+            return {"skipped": "assignee not found"}
+        artifacts = self.storage.get_artifacts(task_id)
+        verifications = self.storage.get_verifications(task_id)
+        memory = self.registry.load_memory(profile.id)
+        result = self.reflector.review(
+            task_id, contract, profile, artifacts, verifications, memory
+        )
+        allowed = {task_id, f"task:{task_id}"}
+        allowed.update(artifact["id"] for artifact in artifacts)
+        allowed.update(check["name"] for check in verifications)
+
+        facts: list[MemoryEntry] = []
+        existing_text = {entry.text.casefold() for entry in memory}
+        for fact in result.facts:
+            if self._is_trivial_fact(fact.text):
+                self.storage.add_event(
+                    task_id,
+                    "reflector",
+                    "fact_rejected",
+                    {"text": fact.text, "reason": "trivial task summary"},
+                )
+                continue
+            evidence = [item for item in fact.evidence if item in allowed]
+            if not evidence:
+                self.storage.add_event(
+                    task_id,
+                    "reflector",
+                    "fact_rejected",
+                    {"text": fact.text, "reason": "no valid evidence"},
+                )
+                continue
+            if fact.text.casefold() in existing_text:
+                self.storage.add_event(
+                    task_id,
+                    "reflector",
+                    "fact_duplicate",
+                    {"text": fact.text},
+                )
+                continue
+            existing_text.add(fact.text.casefold())
+            facts.append(
+                MemoryEntry(
+                    id="m_" + uuid.uuid4().hex[:10],
+                    ts=utc_now(),
+                    kind=fact.kind,
+                    text=fact.text,
+                    evidence=evidence,
+                    source_task=task_id,
+                    created_by="reflection",
+                )
+            )
+        if facts:
+            self.registry.append_memory(profile.id, facts)
+
+        version = profile.version
+        safe_style_keys = {"tone", "length", "language", "report_format"}
+        sensitive_style = {
+            key: value
+            for key, value in result.style.items()
+            if key not in safe_style_keys
+        }
+        safe_style = {
+            key: value
+            for key, value in result.style.items()
+            if key in safe_style_keys
+        }
+        if result.sop_notes or safe_style:
+            updated = self.registry.update_profile(
+                profile.id,
+                sop_notes_append=result.sop_notes,
+                style=safe_style or None,
+                reason="verified task reflection",
+                evidence=[task_id],
+                actor="reflection",
+            )
+            version = updated.version
+
+        pending_style = 0
+        if sensitive_style:
+            self.registry.add_change(
+                profile.id,
+                kind="style",
+                proposed=json.dumps(sensitive_style, ensure_ascii=False),
+                reason="reflection suggested a behavior/approval change",
+                evidence=[task_id],
+            )
+            pending_style = 1
+
+        for suggestion in result.suggestions:
+            self.registry.add_change(
+                profile.id,
+                kind=suggestion.kind,
+                proposed=suggestion.proposed,
+                reason=suggestion.reason,
+                evidence=[task_id],
+            )
+
+        summary = {
+            "facts": len(facts),
+            "sop_notes": len(result.sop_notes),
+            "suggestions": len(result.suggestions) + pending_style,
+            "version": version,
+        }
+        if any(summary[key] for key in ("facts", "sop_notes", "suggestions")):
+            self.storage.add_event(
+                task_id, "reflector", "mind_updated", summary
+            )
+        else:
+            self.storage.add_event(
+                task_id, "reflector", "reflection_no_changes", summary
+            )
+        return summary
+
+    @staticmethod
+    def _is_trivial_fact(text: str) -> bool:
+        value = " ".join(text.casefold().split())
+        if re.match(
+            r"^(the\s+)?task\b.*\b(completed|passed)\b.*"
+            r"\b(acceptance|tests|successfully)\b",
+            value,
+        ):
+            return True
+        return "task completed successfully" in value
 
     def _fail_task(self, task_id: str, stage: str, error: Exception) -> None:
         task = self.storage.get_task(task_id)
@@ -323,6 +471,14 @@ class Kernel:
             ),
             None,
         )
+        mind_update = next(
+            (
+                event["data"]
+                for event in reversed(events)
+                if event["type"] == "mind_updated"
+            ),
+            None,
+        )
         total_cost = self.storage.total_cost(task_id)
         total_tokens = self.storage.total_tokens(task_id)
 
@@ -409,6 +565,20 @@ class Kernel:
             f"- Total: {total_tokens} tokens, ${total_cost:.6f} (estimated)"
         )
         lines.append("")
+
+        if mind_update:
+            facts = mind_update.get("facts", 0)
+            notes = mind_update.get("sop_notes", 0)
+            suggestions = mind_update.get("suggestions", 0)
+            lines.append("## Mind")
+            lines.append(
+                f"- {facts} fact{'s' if facts != 1 else ''}, "
+                f"{notes} SOP note{'s' if notes != 1 else ''}, "
+                f"{suggestions} pending suggestion"
+                f"{'s' if suggestions != 1 else ''} "
+                f"(profile v{mind_update.get('version', '?')})."
+            )
+            lines.append("")
 
         failed = [item["name"] for item in verifications if not item["passed"]]
         lines.append("## Boss report (kernel-verified)")

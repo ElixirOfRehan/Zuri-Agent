@@ -12,6 +12,49 @@ from .sandbox import normalize_relative
 RESERVED_IDS = {"boss", "worker", "hr", "kernel", "verifier"}
 AGENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 
+STYLE_DEFAULTS = {
+    "tone": "direct",
+    "length": "short",
+    "language": "en",
+    "initiative": "ask",
+    "risk": "low",
+    "approval": "strict",
+    "report_format": "evidence-first",
+}
+STYLE_OPTIONS = {
+    "tone": {"direct", "friendly", "formal"},
+    "length": {"short", "standard", "detailed"},
+    "initiative": {"ask", "act"},
+    "risk": {"low", "medium", "high"},
+    "approval": {"strict", "balanced"},
+    "report_format": {"evidence-first", "brief", "detailed"},
+}
+
+
+def effective_style(style: dict | None) -> dict:
+    merged = dict(STYLE_DEFAULTS)
+    merged.update(style or {})
+    return merged
+
+
+def validate_style(style: dict | None) -> dict:
+    value = dict(style or {})
+    unknown = set(value) - set(STYLE_DEFAULTS)
+    if unknown:
+        raise ValueError(f"unknown style keys: {', '.join(sorted(unknown))}")
+    for key, allowed in STYLE_OPTIONS.items():
+        if key in value and value[key] not in allowed:
+            raise ValueError(
+                f"invalid style value for {key}: {value[key]!r}; "
+                f"allowed: {', '.join(sorted(allowed))}"
+            )
+    if "language" in value:
+        language = str(value["language"])
+        if not re.match(r"^[A-Za-z-]{2,16}$", language):
+            raise ValueError("language must be 2-16 letters or hyphens")
+        value["language"] = language
+    return value
+
 
 class TaskStatus(str, Enum):
     CREATED = "created"
@@ -111,6 +154,7 @@ class AgentSpec(BaseModel):
     tools: list[str] = []
     description: str = ""
     style: dict = {}
+    sop_notes: list[str] = []
     source: str = "user"
     enabled: bool = True
     version: int = 1
@@ -138,6 +182,30 @@ class AgentSpec(BaseModel):
     def _tools_unique(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(value))
 
+    @field_validator("style")
+    @classmethod
+    def _style_valid(cls, value: dict) -> dict:
+        return validate_style(value)
+
+    @field_validator("sop_notes")
+    @classmethod
+    def _sop_notes_valid(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for note in value:
+            text = note.strip()
+            if not text:
+                continue
+            if len(text) > 500:
+                raise ValueError("each sop_note must be at most 500 chars")
+            if text not in cleaned:
+                cleaned.append(text)
+        if len(cleaned) > 50:
+            raise ValueError("at most 50 sop_notes")
+        return cleaned
+
+    def effective_style(self) -> dict:
+        return effective_style(self.style)
+
     def resolve_model(self, settings) -> str:
         if self.model_env:
             import os
@@ -158,6 +226,98 @@ class AgentProposal(BaseModel):
     spec: AgentSpec
     status: Literal["pending", "approved", "rejected"] = "pending"
     created_at: str = ""
+
+
+class MemoryEntry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    ts: str
+    kind: Literal["lesson", "preference", "project_fact", "user_fact"]
+    text: str
+    evidence: list[str] = []
+    source_task: str | None = None
+    created_by: str = "reflection"
+    status: Literal["active", "forgotten"] = "active"
+
+    @field_validator("text")
+    @classmethod
+    def _text_not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("memory text must not be empty")
+        return value.strip()
+
+
+class AgentChange(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    change_id: str
+    agent_id: str
+    kind: Literal["tools", "model", "scope", "system_prompt", "style"]
+    proposed: str
+    reason: str = ""
+    evidence: list[str] = []
+    status: Literal["pending", "approved", "rejected"] = "pending"
+    created_at: str = ""
+
+
+class ReflectionFact(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    text: str
+    kind: Literal["lesson", "preference", "project_fact"]
+    evidence: list[str] = []
+
+    @field_validator("text")
+    @classmethod
+    def _text_not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("fact text must not be empty")
+        return value.strip()
+
+
+class ReflectionSuggestion(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    kind: Literal["tools", "model", "scope", "system_prompt"]
+    proposed: str
+    reason: str = ""
+
+
+class ReflectionResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    facts: list[ReflectionFact] = []
+    sop_notes: list[str] = []
+    style: dict = {}
+    suggestions: list[ReflectionSuggestion] = []
+
+    @field_validator("facts")
+    @classmethod
+    def _facts_bounded(cls, value: list[ReflectionFact]) -> list[ReflectionFact]:
+        return value[:5]
+
+    @field_validator("sop_notes")
+    @classmethod
+    def _notes_bounded(cls, value: list[str]) -> list[str]:
+        cleaned = []
+        for note in value:
+            text = note.strip()
+            if text and len(text) <= 500 and text not in cleaned:
+                cleaned.append(text)
+        return cleaned[:3]
+
+    @field_validator("style")
+    @classmethod
+    def _style_valid(cls, value: dict) -> dict:
+        return validate_style(value)
+
+    @field_validator("suggestions")
+    @classmethod
+    def _suggestions_bounded(
+        cls, value: list[ReflectionSuggestion]
+    ) -> list[ReflectionSuggestion]:
+        return value[:3]
 
 
 @dataclass

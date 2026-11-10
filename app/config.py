@@ -27,6 +27,8 @@ class Settings:
     boss_spec_path: Path
     worker_spec_path: Path
     hr_spec_path: Path
+    reflector_model: str = "deepseek-flash"
+    reflection_enabled: bool = True
     request_timeout_s: int = 120
     max_read_bytes: int = 65_536
     max_write_bytes: int = 1_000_000
@@ -90,6 +92,14 @@ class Settings:
             boss_spec_path=root_path / "agents" / "boss" / "profile.json",
             worker_spec_path=root_path / "agents" / "worker" / "profile.json",
             hr_spec_path=root_path / "agents" / "hr" / "profile.json",
+            reflector_model=os.getenv(
+                "ZURI_REFLECTOR_MODEL",
+                os.getenv("ZURI_WORKER_MODEL", "deepseek-flash"),
+            ).strip(),
+            reflection_enabled=os.getenv("ZURI_REFLECTION_ENABLED", "1")
+            .strip()
+            .lower()
+            not in {"0", "false", "no", "off"},
             request_timeout_s=int(os.getenv("ZURI_REQUEST_TIMEOUT_S", "120")),
             thinking=os.getenv("ZURI_THINKING", "disabled").strip().lower(),
         )

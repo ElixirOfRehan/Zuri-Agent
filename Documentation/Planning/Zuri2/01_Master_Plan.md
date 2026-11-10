@@ -333,6 +333,8 @@ Plan: `02_Slice1A_Agent_Lifecycle.md`.
 
 ### Slice 1B — Agent Mind v1
 
+Status: **implemented, awaiting user confirmation.**
+
 Minimal agent creation, configurable Boss/agent style, evidence-linked memory,
 reflection after verified tasks, versioned profile updates, rollback, memory
 viewer. Plan: `03_Slice1B_Agent_Mind.md`.

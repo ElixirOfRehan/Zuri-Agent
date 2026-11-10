@@ -8,6 +8,7 @@ workspace/*
 !workspace/.gitkeep
 agents/.trash/
 agents/*/memory.jsonl
+agents/*/pending_changes.json
 *.log
 node_modules/
 dist/

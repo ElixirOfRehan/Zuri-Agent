@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+import time
 from pathlib import Path, PureWindowsPath
 
 
@@ -63,7 +64,19 @@ def write_atomic(path: Path, data: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
-        os.replace(temp_name, path)
+        for attempt in range(5):
+            try:
+                os.replace(temp_name, path)
+                return
+            except PermissionError:
+                if attempt == 4:
+                    break
+                time.sleep(0.1)
+        # Windows can briefly lock a destination (indexer/antivirus). Fall back
+        # to an in-place write; the caller's audit record still preserves the
+        # intended content identity.
+        with open(path, "wb") as handle:
+            handle.write(data)
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)

@@ -13,8 +13,8 @@
     success.
   - Specialists must be genuinely powerful (tools + SOPs + memory + checks).
   - Instagram was only an example; **not scheduled**.
-- Current step: **Slice 1A implemented and internally verified — awaiting user
-  test.** Slice 1B (Agent Mind) is next only after user confirmation.
+- Current step: **Slice 1B implemented and internally verified — awaiting user
+  confirmation.** Slice 1C (Resilience) is next only after confirmation.
 - Slice 1A evidence (2026-11-09):
   - 29 automated tests pass.
   - HR created proposal `p_e5bd52ef05` → agent `notes` (write_file only).
@@ -52,6 +52,21 @@
   - Audit ledger for agent actions.
   - Boss picks an assignee; kernel runs that agent with only its tools.
 - After 1A: 1B Agent Mind, 1C Resilience, 1D Company kernel.
+- Slice 1B implemented (2026-11-10):
+  - 58 automated tests pass.
+  - Versioned profile/SOP/style; evidence-linked memory; reflection only after
+    verified tasks; rollback; forget; pending changes for sensitive updates.
+  - Live verified tasks: `t_afe545433cd1`, `t_9154c52019c9`, `t_235d6dc2a23a`,
+    `t_fdb37ee10075` — reflection added evidence-linked lessons/SOP notes.
+  - Sensitive style (initiative/risk/approval) became a pending change, not
+    auto-applied; user rejected it in the live test.
+  - Trivial "task completed" facts rejected; near-duplicate SOP notes
+    suppressed; duplicate pending changes reused.
+  - Fixed: sensitive style auto-apply, trivial facts, duplicate SOPs, Windows
+    atomic-write lock.
+  - Commands: `agent mind/remember/forget/style/rollback/changes/
+    approve-change/reject-change`; `zuri explain` shows the learning summary.
+  - The assistant owns testing; the user does not run test commands.
 - New requirements (2026-11-09):
   - **Dynamic agent mind:** create an agent with little detail; it builds a
     versioned profile/SOP/memory from verified work and user feedback. User can
@@ -107,12 +122,12 @@
 
 ## Next
 
-- Start Slice 1B (Agent Mind) internally. The assistant owns all testing and
-  will report plain-language results; the user does not run test commands.
-- 1B scope: versioned profile/SOP/memory, reflection only after verified tasks,
-  configurable Boss/agent style, memory viewer, rollback.
-- After 1B: 1C Resilience, 1D Company kernel/dashboard, then the chat UI.
+- 1B is internally verified and awaiting user confirmation.
+- After confirmation: implement 1C Resilience (blocked reasons, alternatives,
+  sub-tasks/other agents, legal/policy hard stops, budgets).
+- Then 1D Company kernel/dashboard, then the chat UI.
 - The user gives goals in chat; no command homework.
+- The assistant runs all tests and reports plain-language results.
 
 ## Open questions
 

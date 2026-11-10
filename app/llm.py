@@ -8,7 +8,13 @@ from openai import OpenAI
 from pydantic import ValidationError
 
 from .config import Settings
-from .models import AgentSpec, TaskContract, WorkerOutcome
+from .models import (
+    AgentSpec,
+    MemoryEntry,
+    ReflectionResult,
+    TaskContract,
+    WorkerOutcome,
+)
 from .redact import preview, redact
 from .storage import Storage
 from .tools import ToolSet
@@ -106,8 +112,18 @@ class DeepSeekLLM:
             assignee_block = (
                 "\n\nAvailable assignees (choose exactly one id):\n" + lines
             )
+        style = boss_spec.effective_style()
+        style_block = (
+            "\n\nBoss behavior style: "
+            + ", ".join(f"{key}={value}" for key, value in style.items())
+        )
+        if boss_spec.sop_notes:
+            style_block += "\nBoss learned notes:\n" + "\n".join(
+                f"- {note}" for note in boss_spec.sop_notes[-10:]
+            )
         system = (
             boss_spec.system_prompt.strip()
+            + style_block
             + assignee_block
             + "\n\nYou must return ONLY a JSON object matching this schema:\n"
             + schema
@@ -212,16 +228,128 @@ class DeepSeekLLM:
         )
         return (message.content or "").strip()
 
+    def reflect(
+        self,
+        task_id: str,
+        contract: TaskContract,
+        profile: AgentSpec,
+        artifacts: list[dict],
+        verifications: list[dict],
+        memory: list[MemoryEntry],
+    ) -> ReflectionResult:
+        model = self.settings.reflector_model or self.settings.worker_model
+        allowed = [task_id, f"task:{task_id}"]
+        allowed.extend(artifact["id"] for artifact in artifacts)
+        allowed.extend(check["name"] for check in verifications)
+        payload = {
+            "task": {"id": task_id, "contract": contract.model_dump()},
+            "profile": {
+                "id": profile.id,
+                "name": profile.name,
+                "system_prompt": profile.system_prompt,
+                "sop_notes": profile.sop_notes,
+                "style": profile.effective_style(),
+            },
+            "artifacts": [
+                {"id": item["id"], "path": item["path"], "sha256": item["sha256"]}
+                for item in artifacts
+            ],
+            "verifications": [
+                {
+                    "name": item["name"],
+                    "passed": item["passed"],
+                    "detail": item["detail"],
+                }
+                for item in verifications
+            ],
+            "existing_memory": [
+                {"id": item.id, "kind": item.kind, "text": item.text}
+                for item in memory[-20:]
+            ],
+            "allowed_evidence": allowed,
+        }
+        system = (
+            "You are the reflection step of a small AI company. The task was "
+            "independently verified. Extract only lessons that are supported by "
+            "the provided evidence.\n\n"
+            "Return ONLY JSON matching this schema:\n"
+            + json.dumps(ReflectionResult.model_json_schema(), indent=2)
+            + "\n\nRules:\n"
+            "- facts: at most 5. Each fact needs evidence from allowed_evidence.\n"
+            "- Do not repeat facts or notes already present in existing_memory "
+            "or the profile's sop_notes.\n"
+            "- Prefer reusable lessons and preferences; do not record trivial "
+            "facts like 'the task completed successfully'.\n"
+            "- sop_notes: at most 3 short, reusable procedure notes that are not "
+            "semantic duplicates of existing sop_notes.\n"
+            "- style: only these keys: tone (direct|friendly|formal), length "
+            "(short|standard|detailed), language, initiative (ask|act), risk "
+            "(low|medium|high), approval (strict|balanced), report_format "
+            "(evidence-first|brief|detailed). Omit keys you are unsure about.\n"
+            "- suggestions: at most 3 for tools/model/scope/system_prompt. These "
+            "are NOT applied automatically; they become pending user approvals.\n"
+            "- Never include secrets, credentials or invented results.\n"
+            "- Use only what is in the payload; no outside assumptions."
+        )
+        messages: list[dict] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(payload, indent=2, ensure_ascii=False)},
+        ]
+        last_error = ""
+        for _attempt in range(2):
+            message = self._chat(
+                model=model,
+                messages=messages,
+                agent="reflector",
+                task_id=task_id,
+                response_format={"type": "json_object"},
+                temperature=0.1,
+            )
+            content = _strip_fences(message.content or "")
+            try:
+                return ReflectionResult.model_validate(json.loads(content))
+            except (json.JSONDecodeError, ValidationError) as error:
+                last_error = str(error)
+                messages = messages + [
+                    {"role": "assistant", "content": content},
+                    {
+                        "role": "user",
+                        "content": (
+                            "That reflection is invalid: "
+                            + last_error
+                            + "\nReturn corrected JSON only."
+                        ),
+                    },
+                ]
+        raise ValueError(f"Reflection failed validation: {last_error}")
+
     def run_worker(
         self,
         contract: TaskContract,
         worker_spec: AgentSpec,
         toolset: ToolSet,
         task_id: str,
+        memory: list[MemoryEntry] | None = None,
     ) -> WorkerOutcome:
         model = worker_spec.resolve_model(self.settings) or self.settings.worker_model
+        style = worker_spec.effective_style()
+        context = (
+            "\n\nBehavior style: "
+            + ", ".join(f"{key}={value}" for key, value in style.items())
+        )
+        if worker_spec.sop_notes:
+            context += "\nLearned SOP notes:\n" + "\n".join(
+                f"- {note}" for note in worker_spec.sop_notes[-10:]
+            )
+        if memory:
+            context += "\nRelevant evidence-backed memory:\n" + "\n".join(
+                f"- [{entry.kind}] {entry.text}" for entry in memory[-10:]
+            )
         messages: list[dict] = [
-            {"role": "system", "content": worker_spec.system_prompt.strip()},
+            {
+                "role": "system",
+                "content": worker_spec.system_prompt.strip() + context,
+            },
             {
                 "role": "user",
                 "content": (

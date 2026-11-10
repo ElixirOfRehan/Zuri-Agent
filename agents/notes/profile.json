@@ -8,10 +8,24 @@
     "write_file"
   ],
   "description": "Writes clean markdown notes with headings and bullet points.",
-  "style": {},
+  "style": {
+    "tone": "direct",
+    "length": "short",
+    "language": "en",
+    "initiative": "ask",
+    "risk": "low",
+    "approval": "strict",
+    "report_format": "evidence-first"
+  },
+  "sop_notes": [
+    "For markdown note tasks, write the file with headings and bullet points, then confirm it exists, is non-empty, and contains required keywords.",
+    "For markdown checklist tasks, write the file with headings and bullet points, then verify it exists, is non-empty, and contains the required keywords.",
+    "For short checklist tasks, keep the file concise with a heading and bullet points, then verify existence, non-emptiness, and required keywords.",
+    "When a checklist must cover specific topics, add a heading per topic and one or two bullets under each, then confirm the file contains each required keyword."
+  ],
   "source": "user",
   "enabled": true,
-  "version": 1,
+  "version": 8,
   "created_at": "2026-11-09T15:28:40+00:00",
-  "updated_at": "2026-11-09T15:28:40+00:00"
+  "updated_at": "2026-11-10T11:58:51+00:00"
 }

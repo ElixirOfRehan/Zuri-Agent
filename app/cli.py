@@ -307,6 +307,26 @@ def cmd_explain(args: argparse.Namespace) -> int:
             print("  - No verification ran.")
         if error:
             print(f"  - Error: {error}")
+        mind_update = next(
+            (
+                event["data"]
+                for event in reversed(data["events"])
+                if event["type"] == "mind_updated"
+            ),
+            None,
+        )
+        if mind_update:
+            facts = mind_update.get("facts", 0)
+            notes = mind_update.get("sop_notes", 0)
+            suggestions = mind_update.get("suggestions", 0)
+            print(
+                f"  - The agent's mind was updated: "
+                f"{facts} fact{'s' if facts != 1 else ''}, "
+                f"{notes} SOP note{'s' if notes != 1 else ''}, "
+                f"{suggestions} pending suggestion"
+                f"{'s' if suggestions != 1 else ''} "
+                f"(profile v{mind_update.get('version', '?')})."
+            )
         print("")
         if task["status"] == "succeeded":
             print("Result: VERIFIED.")
@@ -397,6 +417,167 @@ def cmd_ping(args: argparse.Namespace) -> int:
     except Exception as error:  # noqa: BLE001
         print(f"API FAILED: {error}")
         return 1
+    finally:
+        kernel.close()
+
+
+def cmd_agent_mind(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        spec = kernel.registry.get(args.agent_id)
+        if spec is None:
+            print(f"ERROR: agent not found: {args.agent_id}")
+            return 2
+        print(f"Agent: {spec.id} ({spec.name})")
+        print(f"Version: {spec.version} | Source: {spec.source}")
+        print(
+            "Style: "
+            + ", ".join(f"{key}={value}" for key, value in spec.effective_style().items())
+        )
+        print("SOP notes:")
+        if spec.sop_notes:
+            for note in spec.sop_notes:
+                print(f"  - {note}")
+        else:
+            print("  (none)")
+        memory = kernel.registry.load_memory(spec.id)
+        print("Memory (active):")
+        if memory:
+            for entry in memory:
+                print(
+                    f"  [{entry.id}] {entry.kind}: {entry.text} "
+                    f"(evidence: {', '.join(entry.evidence) or 'none'})"
+                )
+        else:
+            print("  (empty)")
+        print("Profile versions: " + ", ".join(str(v) for v in kernel.registry.list_versions(spec.id)))
+        changes = kernel.registry.list_changes(spec.id, "pending")
+        print("Pending changes:")
+        if changes:
+            for change in changes:
+                print(
+                    f"  [{change.change_id}] {change.kind}: {change.proposed} "
+                    f"- {change.reason or 'no reason'}"
+                )
+        else:
+            print("  (none)")
+        history = kernel.registry.history(spec.id, 8)
+        if history:
+            print("Recent history:")
+            for event in history:
+                print(f"  {event['ts']} {event['action']}")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_remember(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        text = " ".join(args.text)
+        entry = kernel.registry.remember_user_fact(args.agent_id, text)
+        print(f"Remembered for {args.agent_id}: {entry.text}")
+        print(f"Memory id: {entry.id}")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_forget(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        entry = kernel.registry.forget_memory(args.agent_id, args.memory_id)
+        print(f"Forgot memory {entry.id} for {args.agent_id}.")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_style(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        style: dict = {}
+        for item in args.assignments:
+            if "=" not in item:
+                print(f"ERROR: style value must be key=value: {item}")
+                return 2
+            key, value = item.split("=", 1)
+            style[key.strip()] = value.strip()
+        spec = kernel.registry.update_profile(
+            args.agent_id,
+            style=style,
+            reason="user style update",
+            actor="user",
+        )
+        print(f"Style for {spec.id}:")
+        for key, value in spec.effective_style().items():
+            print(f"  {key}={value}")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_rollback(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        raw = args.version.lower().lstrip("v")
+        version = int(raw)
+        spec = kernel.registry.rollback_profile(args.agent_id, version)
+        print(
+            f"Agent {spec.id} restored from v{version:04d}; "
+            f"new version is v{spec.version:04d}."
+        )
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_changes(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        status = None if args.all else "pending"
+        changes = kernel.registry.list_changes(args.agent_id, status)
+        if not changes:
+            print("No pending changes.")
+            return 0
+        for change in changes:
+            print(
+                f"{change.change_id}  {change.kind:<13} {change.status:<9} "
+                f"{change.proposed} - {change.reason or 'no reason'}"
+            )
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_approve_change(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        change = kernel.registry.approve_change(
+            args.agent_id, args.change_id
+        )
+        print(f"Approved {change.change_id} ({change.kind}) for {args.agent_id}.")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_reject_change(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        change = kernel.registry.reject_change(
+            args.agent_id, args.change_id
+        )
+        print(f"Rejected {change.change_id} ({change.kind}) for {args.agent_id}.")
+        return 0
     finally:
         kernel.close()
 
@@ -731,6 +912,53 @@ def build_parser() -> argparse.ArgumentParser:
     agent_history = agent_sub.add_parser("history", help="Show agent audit events")
     agent_history.add_argument("agent_id")
     agent_history.set_defaults(func=cmd_agent_history)
+
+    agent_mind = agent_sub.add_parser("mind", help="Show an agent's mind")
+    agent_mind.add_argument("agent_id")
+    agent_mind.set_defaults(func=cmd_agent_mind)
+
+    agent_remember = agent_sub.add_parser("remember", help="Add a user fact")
+    agent_remember.add_argument("agent_id")
+    agent_remember.add_argument("text", nargs="+")
+    agent_remember.set_defaults(func=cmd_agent_remember)
+
+    agent_forget = agent_sub.add_parser("forget", help="Forget a memory entry")
+    agent_forget.add_argument("agent_id")
+    agent_forget.add_argument("memory_id")
+    agent_forget.set_defaults(func=cmd_agent_forget)
+
+    agent_style = agent_sub.add_parser("style", help="Update agent style")
+    agent_style.add_argument("agent_id")
+    agent_style.add_argument("assignments", nargs="+")
+    agent_style.set_defaults(func=cmd_agent_style)
+
+    agent_rollback = agent_sub.add_parser(
+        "rollback", help="Restore an older profile version"
+    )
+    agent_rollback.add_argument("agent_id")
+    agent_rollback.add_argument("version")
+    agent_rollback.set_defaults(func=cmd_agent_rollback)
+
+    agent_changes = agent_sub.add_parser(
+        "changes", help="Show pending profile changes"
+    )
+    agent_changes.add_argument("agent_id")
+    agent_changes.add_argument("--all", action="store_true")
+    agent_changes.set_defaults(func=cmd_agent_changes)
+
+    agent_approve_change = agent_sub.add_parser(
+        "approve-change", help="Approve a pending profile change"
+    )
+    agent_approve_change.add_argument("agent_id")
+    agent_approve_change.add_argument("change_id")
+    agent_approve_change.set_defaults(func=cmd_agent_approve_change)
+
+    agent_reject_change = agent_sub.add_parser(
+        "reject-change", help="Reject a pending profile change"
+    )
+    agent_reject_change.add_argument("agent_id")
+    agent_reject_change.add_argument("change_id")
+    agent_reject_change.set_defaults(func=cmd_agent_reject_change)
 
     liar = sub.add_parser("liar-test", help="Prove a fake success claim is rejected")
     liar.set_defaults(func=cmd_liar)
