@@ -7,8 +7,8 @@ actually done.
 **Core promise:** you can see every action and every artifact. No task succeeds
 because an AI said so; it succeeds only when the evidence matches the ledger.
 
-Status: **Slice 2B (OpenCode + QA) implemented — awaiting user
-confirmation.** Parallel departments and UI polish remain.
+Status: **Slice 2C (Research + web tools) implemented — awaiting user
+confirmation.** UI polish and parallel departments remain.
 
 ## Web dashboard (local)
 
@@ -197,6 +197,30 @@ checks the deliverables, command evidence and code/content:
 
 Disable QA with `ZURI_QA_ENABLED=0`. Configure models with
 `ZURI_OPENCODE_MODEL` and `ZURI_QA_MODEL`.
+
+## Research agent and web tools
+
+The seeded `research` agent can use:
+
+- `http_get` — GET a public http(s) URL; returns status, content type and text.
+- `browse_page` — open a public page in headless Chrome and return title,
+  visible text and links.
+
+Both are restricted:
+
+- public http(s) only; localhost, private/link-local networks and odd ports are
+  blocked,
+- no credentials, cookies, auth, forms, clicks or POST,
+- 2 MB HTTP limit, timeouts, bounded text,
+- headless Chrome request filtering blocks non-public subresources,
+- no screenshots or downloads.
+
+Set `ZURI_NETWORK_ENABLED=0` to disable both. Set
+`ZURI_BROWSER_EXECUTABLE` if Chrome/Edge is not in a standard location.
+
+**Security:** web content is untrusted (prompt injection risk), and the browser
+runs page JavaScript with your user permissions. It is not an OS sandbox. Use
+trusted public sources and review results.
 
 ## What is recorded
 

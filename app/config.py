@@ -34,6 +34,8 @@ class Settings:
     opencode_model: str = "deepseek/deepseek-v4-pro"
     qa_enabled: bool = True
     qa_model: str = "deepseek-v4-pro"
+    network_enabled: bool = True
+    browser_executable: str = ""
     shell_enabled: bool = True
     allowed_commands: tuple[str, ...] = (
         "python",
@@ -130,6 +132,14 @@ class Settings:
             not in {"0", "false", "no", "off"},
             qa_model=os.getenv(
                 "ZURI_QA_MODEL", os.getenv("ZURI_BOSS_MODEL", "deepseek-v4-pro")
+            ).strip(),
+            network_enabled=os.getenv("ZURI_NETWORK_ENABLED", "1")
+            .strip()
+            .lower()
+            not in {"0", "false", "no", "off"},
+            browser_executable=os.getenv(
+                "ZURI_BROWSER_EXECUTABLE",
+                os.getenv("REA_BROWSER_EXECUTABLE", ""),
             ).strip(),
             shell_enabled=os.getenv("ZURI_SHELL_ENABLED", "1")
             .strip()

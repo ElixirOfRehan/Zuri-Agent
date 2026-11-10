@@ -231,12 +231,26 @@ user is not expected to run commands or interpret raw logs.
 - [ ] OpenCode session reuse
 - [ ] parallel departments
 
+### Research and web tools (2C)
+- [x] public URL validation (private/loopback/link-local/ports/credentials)
+- [x] network disabled
+- [x] empty URL
+- [x] web tools granted to Engineering/Research, not to notes
+- [x] live `http_get` (example.com)
+- [x] live `browse_page` headless Chrome (title/text)
+- [x] live Research task fetched a page and wrote a verified report
+- [ ] DNS rebinding hardening
+- [ ] WebSocket/WebRTC filtering
+- [ ] authenticated pages/forms
+- [ ] screenshot/download capture
+
 ## Current status
 
-- 93 automated tests pass.
+- 98 tests collected (96 default + 2 opt-in live); all pass with
+  `ZURI_LIVE_TESTS=1`.
 - Liar Test passes.
-- Live verified tasks through Slice 2B; reflection, resilience, dashboard,
-  engineering tools, OpenCode delegation and QA are live-tested.
+- Live verified tasks through Slice 2C; reflection, resilience, dashboard,
+  engineering tools, OpenCode, QA, HTTP and headless browser are live-tested.
 
 ## Known limits
 

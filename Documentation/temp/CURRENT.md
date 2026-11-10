@@ -1,4 +1,4 @@
-﻿# CURRENT â€” Zuri Agent
+﻿# CURRENT - Zuri Agent
 
 ## Active
 
@@ -13,21 +13,21 @@
     success.
   - Specialists must be genuinely powerful (tools + SOPs + memory + checks).
   - Instagram was only an example; **not scheduled**.
-- Current step: **Slice 2B (OpenCode + QA) implemented and internally verified â€”
-  awaiting user confirmation.** Parallel departments and UI polish remain.
+- Current step: **Slice 2C (Research + web tools) implemented and internally verified -
+  awaiting user confirmation.** UI polish and parallel departments remain.
 - Slice 1A evidence (2026-11-09):
   - 29 automated tests pass.
-  - HR created proposal `p_e5bd52ef05` â†’ agent `notes` (write_file only).
-  - `zuri run "Use the notes agent ..."` â†’ `t_15fb0257746e`, assignee `notes`,
+  - HR created proposal `p_e5bd52ef05` -> agent `notes` (write_file only).
+  - `zuri run "Use the notes agent ..."` -> `t_15fb0257746e`, assignee `notes`,
     only its tool granted. First verify failed on `file_contains` case
     sensitivity; fixed to case-insensitive by default and optional
-    `case_sensitive: true`; reverify â†’ 6/6 checks, succeeded.
+    `case_sensitive: true`; reverify -> 6/6 checks, succeeded.
   - Wrong delete confirmations aborted and agent stayed.
   - Correct two confirmations soft-deleted to
     `agents/.trash/notes-20261109-153000-5bcd23`; restore succeeded.
   - Audit events recorded in `agent_events` + `data/agent_ledger.jsonl`.
   - User test follow-up: one run failed with `Connection error.` (transient
-    network; `zuri ping` returned OK). Retried â†’ `t_cdf1b1b8cc6c` succeeded,
+    network; `zuri ping` returned OK). Retried -> `t_cdf1b1b8cc6c` succeeded,
     assignee `notes`, 4/4 checks, ~$0.001642.
   - Added simple commands: `last`, `verify-last`, `guide`, `ping`; clearer
     two-step delete prompts; restore reports "still active" instead of ERROR.
@@ -57,7 +57,7 @@
   - Versioned profile/SOP/style; evidence-linked memory; reflection only after
     verified tasks; rollback; forget; pending changes for sensitive updates.
   - Live verified tasks: `t_afe545433cd1`, `t_9154c52019c9`, `t_235d6dc2a23a`,
-    `t_fdb37ee10075` â€” reflection added evidence-linked lessons/SOP notes.
+    `t_fdb37ee10075` - reflection added evidence-linked lessons/SOP notes.
   - Sensitive style (initiative/risk/approval) became a pending change, not
     auto-applied; user rejected it in the live test.
   - Trivial "task completed" facts rejected; near-duplicate SOP notes
@@ -77,7 +77,7 @@
   - Budget-limited attempts; blocked status and report with every attempt.
   - Live policy block: `t_1b6d4837edff` (credential theft) stopped before
     planning; no API cost; explain/last show the reason.
-  - Live resilience loop: `t_5c896fd1d26b` â€” simulated blocked notes attempt,
+  - Live resilience loop: `t_5c896fd1d26b` - simulated blocked notes attempt,
     real DeepSeek planner proposed alternatives, real worker succeeded on
     attempt 2; file verified; ~$0.001904.
   - `zuri explain` shows attempts and "succeeded after N attempts"; blocked
@@ -129,6 +129,22 @@
     `t_419984968c39` pass; engineering mind updated.
   - HR can grant run_opencode for code/test roles.
 - Next: UI polish or parallel departments after confirmation.
+- Slice 2C implemented (2026-11-10):
+  - 98 tests collected (96 default + 2 opt-in live); all pass with
+    `ZURI_LIVE_TESTS=1`.
+  - `http_get`: public http(s), ports 80/443, SSRF blocks for localhost/
+    private/link-local/reserved, redirect validation, 2 MB/20s limits, no
+    cookies/auth.
+  - `browse_page`: headless Chrome, request-routing blocks non-public
+    subresources, title/text/links, no clicks/forms/auth/downloads.
+  - Seeded Research agent (list/read/write/http_get/browse_page); Engineering
+    gets web tools for docs; HR can grant them.
+  - Live: `http_get`/`browse_page` example.com 200; Research task
+    `t_fdb0277e6079` fetched and wrote work/example.md, 4/4 checks,
+    ~$0.005344; mind updated.
+  - Security: web content is untrusted (prompt injection), browser is not an OS
+    sandbox; `ZURI_NETWORK_ENABLED=0` disables.
+- Next: UI polish or parallel departments after confirmation.
 - New requirements (2026-11-09):
   - **Dynamic agent mind:** create an agent with little detail; it builds a
     versioned profile/SOP/memory from verified work and user feedback. User can
@@ -149,19 +165,19 @@
   - `.env`, `data/`, `workspace/`, agent memory/trash are gitignored.
 - Slice 0 user test:
   - `zuri liar-test` rejected the fake claim.
-  - `zuri run "Create notes/test.md ..."` â†’ `t_64b1feaa9e32` succeeded.
+  - `zuri run "Create notes/test.md ..."` -> `t_64b1feaa9e32` succeeded.
   - `show`/`verify` show latest-run checks only after the run-id fix.
   - No Git repository exists, so no commit was made.
 - Slice 0 evidence (2026-11-09):
   - 17 automated tests pass (`.venv\Scripts\python.exe -m pytest -q`).
-  - Liar Test: task `t_26bfae9532ac` â†’ `failed`; fake success rejected.
-  - Live DeepSeek run: task `t_c29b37553ab7` â†’ `succeeded`; file
+  - Liar Test: task `t_26bfae9532ac` -> `failed`; fake success rejected.
+  - Live DeepSeek run: task `t_c29b37553ab7` -> `succeeded`; file
     `notes/hello.md`; 3/3 checks; 3995 tokens; ~$0.001528 estimated.
   - User live test: `t_64b1feaa9e32` succeeded (notes/test.md),
     `t_027e04cca932` Liar Test rejected.
   - Fixed after user test: repeated `verify` accumulated checks in the report.
     Verification runs now have `run_id`; reports/show use the latest run and
-    mention older runs. New task `t_e50b6cedb7d4` verified 3 times â†’
+    mention older runs. New task `t_e50b6cedb7d4` verified 3 times ->
     "latest of 3 runs", 3 checks, cost ~$0.0015.
   - Commands: `zuri doctor`, `zuri liar-test`, `zuri run ...`, `zuri show`,
     `zuri verify`, `zuri report`.
@@ -184,7 +200,7 @@
 
 ## Next
 
-- Slice 2B is internally verified and awaiting user confirmation.
+- Slice 2C is internally verified and awaiting user confirmation.
 - Then choose: (a) UI polish, or (b) parallel departments.
 - The user gives goals in chat; no command homework.
 - The assistant runs all tests and reports plain-language results.

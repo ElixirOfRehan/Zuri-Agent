@@ -1,6 +1,6 @@
-﻿# temp â€” Zuri Agent working history
+﻿# temp - Zuri Agent working history
 
-## 2026-11-09 â€” Rebuild start
+## 2026-11-09 - Rebuild start
 
 Old project: `D:\Projects\My projects\Zuri Agent` (custom Python orchestrator,
 SQLite task engine, DeepSeek, OpenCode sessions, voice). Read its docs:
@@ -37,7 +37,7 @@ Research notes:
   provider spike.
 - DeepSeek current API: `deepseek-v4-pro`, `deepseek-flash`; 1M context; tool
   calls; JSON; OpenAI + Anthropic-compatible endpoints; very cheap.
-- Machine: i5-8350U, ~15.4 GB RAM, Intel UHD 620 (no real GPU) â†’ local models
+- Machine: i5-8350U, ~15.4 GB RAM, Intel UHD 620 (no real GPU) -> local models
   are not a practical main brain.
 
 Key design direction:
@@ -49,7 +49,7 @@ Key design direction:
 
 No implementation started; Slice 0 plan awaiting approval.
 
-## 2026-11-09 â€” Slice 0 implemented (approved)
+## 2026-11-09 - Slice 0 implemented (approved)
 
 User approved the plan, then added:
 - Instagram was only an example; do not schedule it.
@@ -87,7 +87,7 @@ without changing the trust loop.
 
 Awaiting user test and confirmation before Slice 1.
 
-## 2026-11-09 â€” User test + verification-run fix
+## 2026-11-09 - User test + verification-run fix
 
 User ran Slice 0 in cmd:
 - `zuri liar-test`: `t_027e04cca932` failed as expected (fake success rejected).
@@ -102,12 +102,12 @@ Fix:
 - `Verifier.run` creates a run id; storage returns the latest run by default.
 - Report/show display the latest run and note older runs.
 - `verify` prints the latest run only.
-- New task `t_e50b6cedb7d4` verified 3 times â†’ 3 checks, "latest of 3 runs".
+- New task `t_e50b6cedb7d4` verified 3 times -> 3 checks, "latest of 3 runs".
 - 17 tests still pass.
 
 Status: awaiting explicit user confirmation of Slice 0 before Slice 1.
 
-## 2026-11-09 â€” Slice 0 confirmed; Slice 1A planned
+## 2026-11-09 - Slice 0 confirmed; Slice 1A planned
 
 User confirmed Slice 0 after re-running `show` and `verify` with the run-id
 fix. No commit (project has no Git repository).
@@ -127,7 +127,7 @@ Scope:
 
 Awaiting user approval of Slice 1A before implementation.
 
-## 2026-11-09 â€” Agent Mind, resilience, GitHub repo
+## 2026-11-09 - Agent Mind, resilience, GitHub repo
 
 User added requirements:
 1. **Dynamic history / mind:** if an agent is created with little detail, it
@@ -145,18 +145,18 @@ Design decisions:
 - Slice 1A revised to folder-based agent storage from the start:
   `agents/<id>/profile.json`, `memory.jsonl`, `profiles/vNNNN.json`.
 - New plans:
-  - `03_Slice1B_Agent_Mind.md` â€” minimal creation, style config, memory,
+  - `03_Slice1B_Agent_Mind.md` - minimal creation, style config, memory,
     reflection only after verified tasks, versioning, approval for
     tool/permission/model changes, rollback.
-  - `04_Slice1C_Resilience.md` â€” blocked reasons, >=3 alternatives, scoring,
+  - `04_Slice1C_Resilience.md` - blocked reasons, >=3 alternatives, scoring,
     sub-task/other-agent delegation, user escalation, legal/policy hard stops,
     budgets.
-- Order: 1A (registry/lifecycle) â†’ 1B (mind) â†’ 1C (resilience) â†’
+- Order: 1A (registry/lifecycle) -> 1B (mind) -> 1C (resilience) ->
   1D (company kernel/dashboard).
 - GitHub: git 2.53 installed; global user.name/email unset; repo reachable and
   empty; no init/commit/push yet. Need user confirmation and commit identity.
 
-## 2026-11-09 â€” Slice 1A implemented (approved)
+## 2026-11-09 - Slice 1A implemented (approved)
 
 User approved revised Slice 1A ("go ahead"). Implemented:
 
@@ -174,17 +174,17 @@ User approved revised Slice 1A ("go ahead"). Implemented:
 
 Live verification:
 - 29 tests pass.
-- HR proposal `p_e5bd52ef05` â†’ agent `notes` (write_file only).
+- HR proposal `p_e5bd52ef05` -> agent `notes` (write_file only).
 - Task `t_15fb0257746e` assigned to notes; only write_file granted.
 - First verification failed on case-sensitive `file_contains`; fixed to
-  case-insensitive default with optional `case_sensitive: true`; reverify â†’ 6/6
+  case-insensitive default with optional `case_sensitive: true`; reverify -> 6/6
   checks, succeeded.
 - Wrong delete confirmation aborted; correct confirmations soft-deleted to
   `.trash`; restore succeeded; audit history complete.
 
 No GitHub commit/push yet (identity unset).
 
-## 2026-11-10 â€” Slice 1A test follow-up + GitHub push
+## 2026-11-10 - Slice 1A test follow-up + GitHub push
 
 User test:
 - One `zuri run` failed immediately with `Connection error.` (no model usage).
@@ -209,18 +209,18 @@ GitHub:
   dashboard `86a0a33`, engineering `ea946b3`, opencode+QA `b29a172`.
 - `.env`, `data/`, `workspace/` contents, agent memory and trash are ignored.
 
-## 2026-11-10 â€” User 1A test passed
+## 2026-11-10 - User 1A test passed
 
 User ran the simple path:
 - `zuri.cmd guide`
-- `zuri.cmd run "Create notes/hello.md with the text 'hello'"` â†’
+- `zuri.cmd run "Create notes/hello.md with the text 'hello'"` ->
   `t_76272e742abb` succeeded; assignee `worker`; 3/3 checks; ~$0.001440.
 - `zuri.cmd last` and `zuri.cmd verify-last` both worked.
 
 Slice 1A is verified on the user's machine. Awaiting explicit "confirm 1A"
 before starting 1B (Agent Mind).
 
-## 2026-11-10 â€” Slice 1B implemented (internal)
+## 2026-11-10 - Slice 1B implemented (internal)
 
 Scope delivered:
 - `AgentSpec` style defaults/validation, `sop_notes`, versioned profile.
@@ -260,7 +260,7 @@ Verification:
 
 Awaiting user confirmation of 1B before 1C.
 
-## 2026-11-10 â€” Slice 1C implemented (internal)
+## 2026-11-10 - Slice 1C implemented (internal)
 
 Scope delivered:
 - `report_blocked` control tool available to every agent; reasons:
@@ -280,7 +280,7 @@ Scope delivered:
 Live tests:
 - Policy block: `t_1b6d4837edff` (credential theft) blocked before planning,
   zero cost.
-- Resilience loop: `t_5c896fd1d26b` â€” first attempt simulated blocked, real
+- Resilience loop: `t_5c896fd1d26b` - first attempt simulated blocked, real
   DeepSeek planner proposed 3 alternatives, real worker succeeded on attempt 2;
   file verified; ~$0.001904. Report/explain show both attempts.
 - Test-only `assistant` agent was soft-deleted with two confirmations.
@@ -293,7 +293,7 @@ Verification:
 
 Awaiting user confirmation of 1C before 1D.
 
-## 2026-11-10 â€” Slice 1D implemented (internal)
+## 2026-11-10 - Slice 1D implemented (internal)
 
 Scope delivered:
 - FastAPI local dashboard (`app/web.py`) with inline HTML/CSS/JS:
@@ -310,7 +310,7 @@ Scope delivered:
 Live test:
 - Started `zuri serve` on 127.0.0.1:8766.
 - GET `/` 200, title present.
-- POST `/api/run` â†’ job succeeded â†’ `t_2bc2b0ccc51c`; assignee notes; 3/3
+- POST `/api/run` -> job succeeded -> `t_2bc2b0ccc51c`; assignee notes; 3/3
   checks; 1 artifact; report verified; ~$0.001924.
 - `/api/summary` returned 20 tasks, 4 agents, total cost.
 - Server stopped; port free.
@@ -323,7 +323,7 @@ Limits:
 Verification: 70 tests pass; Liar Test still passes.
 Awaiting user confirmation of 1D; next choice Engineering vs UI polish.
 
-## 2026-11-10 â€” Slice 2 Engineering + tool layer implemented (internal)
+## 2026-11-10 - Slice 2 Engineering + tool layer implemented (internal)
 
 Delivered:
 - `run_command` tool (structured `program` + `arguments`, no shell, workspace
@@ -349,7 +349,7 @@ Live proof:
 
 Awaiting user confirmation of Slice 2; next choice OpenCode/QA vs UI polish.
 
-## 2026-11-10 â€” Slice 2B OpenCode + QA implemented (internal)
+## 2026-11-10 - Slice 2B OpenCode + QA implemented (internal)
 
 Delivered:
 - `run_opencode` tool for Engineering:
@@ -384,7 +384,7 @@ Awaiting user confirmation of 2B; next choice UI polish vs parallel departments.
 
 
 
-## 2026-11-10 â€” 1A confirmed; understanding + test ownership
+## 2026-11-10 - 1A confirmed; understanding + test ownership
 
 User confirmed 1A but said they do not understand what is happening from
 command output and do not want command homework. They want a chat-like

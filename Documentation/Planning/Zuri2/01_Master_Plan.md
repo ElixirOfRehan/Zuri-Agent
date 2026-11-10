@@ -372,6 +372,13 @@ Status: **implemented, awaiting user confirmation.**
 Controlled `run_opencode` tool and an advisory QA reviewer for engineering
 tasks. Details: `08_Slice2B_OpenCode_QA.md`.
 
+### Slice 2C — Research and web tools
+
+Status: **implemented, awaiting user confirmation.**
+
+Public-only `http_get`, headless `browse_page`, and a seeded Research agent.
+Details: `09_Slice2C_Research_Web.md`.
+
 ### Slice 3 — Dashboard, memory and approvals UX
 
 Full task timeline, evidence viewer, diffs/screenshots, approvals inbox,

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
+
+import httpx
 
 from .config import Settings
 from .sandbox import (
@@ -129,6 +134,51 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "http_get",
+            "description": (
+                "Fetch a public http(s) URL with GET only. No auth, cookies, "
+                "localhost or private networks. Returns status, type and text."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browse_page",
+            "description": (
+                "Open a public web page in headless Chrome, wait briefly, and "
+                "return title, visible text and links. No clicks, forms, auth or "
+                "private networks."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "wait_ms": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 5000,
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 20000,
+                    },
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "report_blocked",
             "description": (
                 "Report that the task cannot be completed and why. Use this "
@@ -162,8 +212,18 @@ TOOL_DEFINITIONS = [
 ]
 
 
-KNOWN_TOOLS = {"list_dir", "read_file", "write_file", "run_command", "run_opencode"}
+KNOWN_TOOLS = {
+    "list_dir",
+    "read_file",
+    "write_file",
+    "run_command",
+    "run_opencode",
+    "http_get",
+    "browse_page",
+}
 CONTROL_TOOLS = {"report_blocked"}
+HTTP_MAX_BYTES = 2_000_000
+PUBLIC_PORTS = {80, 443}
 
 OPENCODE_PERMISSIONS = {
     "$schema": "https://opencode.ai/config.json",
@@ -225,6 +285,10 @@ class ToolSet:
                 return self._run_command(arguments)
             if name == "run_opencode":
                 return self._run_opencode(arguments)
+            if name == "http_get":
+                return self._http_get(arguments)
+            if name == "browse_page":
+                return self._browse_page(arguments)
             return json.dumps({"error": f"unknown tool: {name}"})
         except SandboxError as error:
             return json.dumps({"error": f"sandbox: {error}"})
@@ -495,6 +559,273 @@ class ToolSet:
                 "duration_seconds": duration,
             }
         )
+
+    def _validate_public_url(self, raw: str) -> tuple[str | None, str | None]:
+        try:
+            parsed = urlparse(raw)
+        except ValueError as error:
+            return None, str(error)
+        if parsed.scheme not in {"http", "https"}:
+            return None, "only http/https is allowed"
+        if not parsed.hostname:
+            return None, "missing host"
+        if parsed.username or parsed.password:
+            return None, "URL credentials are not allowed"
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        if port not in PUBLIC_PORTS:
+            return None, f"port is not allowed: {port}"
+        host = parsed.hostname.strip().rstrip(".").lower()
+        if not host:
+            return None, "missing host"
+        if host == "localhost" or host.endswith((".local", ".internal", ".localhost")):
+            return None, "local host is blocked"
+        try:
+            infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except OSError as error:
+            return None, f"DNS lookup failed: {error}"
+        if not infos:
+            return None, "no addresses resolved"
+        for info in infos:
+            address = info[4][0].split("%")[0]
+            try:
+                ip = ipaddress.ip_address(address)
+            except ValueError:
+                return None, f"invalid address: {address}"
+            if not ip.is_global:
+                return None, f"non-public address is blocked: {address}"
+        netloc = f"[{host}]" if ":" in host else host
+        return parsed._replace(netloc=netloc, fragment="").geturl(), None
+
+    def _http_get(self, arguments: dict) -> str:
+        if not self.settings.network_enabled:
+            return json.dumps({"error": "network tools are disabled"})
+        url = str(arguments.get("url", "")).strip()
+        if not url:
+            return json.dumps({"error": "url is empty"})
+        current, error = self._validate_public_url(url)
+        if current is None:
+            return json.dumps({"error": error})
+        headers = {"User-Agent": "ZuriAgent/1.0 (local research)"}
+        try:
+            with httpx.Client(
+                follow_redirects=False, timeout=20.0, headers=headers
+            ) as client:
+                for _redirect in range(6):
+                    with client.stream("GET", current) as response:
+                        if response.status_code in {301, 302, 303, 307, 308}:
+                            location = response.headers.get("location")
+                            if not location:
+                                return json.dumps(
+                                    {"error": "redirect without location"}
+                                )
+                            next_url, error = self._validate_public_url(
+                                urljoin(current, location)
+                            )
+                            if next_url is None:
+                                return json.dumps(
+                                    {"error": f"redirect blocked: {error}"}
+                                )
+                            current = next_url
+                            continue
+                        chunks: list[bytes] = []
+                        total = 0
+                        truncated = False
+                        for chunk in response.iter_bytes():
+                            remaining = HTTP_MAX_BYTES - total
+                            if remaining <= 0:
+                                truncated = True
+                                break
+                            if len(chunk) > remaining:
+                                chunks.append(chunk[:remaining])
+                                total += remaining
+                                truncated = True
+                                break
+                            chunks.append(chunk)
+                            total += len(chunk)
+                        raw = b"".join(chunks)
+                        content_type = response.headers.get("content-type", "")
+                        main_type = content_type.split(";")[0].strip().lower()
+                        is_text = (
+                            main_type.startswith("text/")
+                            or main_type
+                            in {
+                                "application/json",
+                                "application/xml",
+                                "application/xhtml+xml",
+                                "application/javascript",
+                            }
+                            or main_type.endswith(("+json", "+xml"))
+                        )
+                        text = (
+                            raw.decode("utf-8", errors="replace") if is_text else ""
+                        )
+                        result = {
+                            "url": url,
+                            "final_url": current,
+                            "status_code": response.status_code,
+                            "content_type": content_type,
+                            "bytes": len(raw),
+                            "truncated": truncated,
+                            "text": text[:20000],
+                        }
+                        self.storage.add_event(
+                            self.task_id,
+                            self.agent,
+                            "http_get",
+                            {
+                                "url": url,
+                                "final_url": current,
+                                "status_code": response.status_code,
+                                "content_type": content_type,
+                                "bytes": len(raw),
+                                "truncated": truncated,
+                            },
+                        )
+                        return json.dumps(result)
+                return json.dumps({"error": "too many redirects"})
+        except httpx.HTTPError as error:
+            self.storage.add_event(
+                self.task_id,
+                self.agent,
+                "http_get",
+                {"url": url, "error": str(error)},
+            )
+            return json.dumps({"error": f"request failed: {error}"})
+
+    def _browser_executable(self) -> str | None:
+        if self.settings.browser_executable:
+            return self.settings.browser_executable
+        candidates = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ]
+        for candidate in candidates:
+            if Path(candidate).is_file():
+                return candidate
+        return shutil.which("chrome") or shutil.which("msedge")
+
+    def _browse_page(self, arguments: dict) -> str:
+        if not self.settings.network_enabled:
+            return json.dumps({"error": "network tools are disabled"})
+        url = str(arguments.get("url", "")).strip()
+        if not url:
+            return json.dumps({"error": "url is empty"})
+        validated, error = self._validate_public_url(url)
+        if validated is None:
+            return json.dumps({"error": error})
+        executable = self._browser_executable()
+        if not executable:
+            return json.dumps({"error": "browser executable not found"})
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as error:  # noqa: BLE001
+            return json.dumps({"error": f"playwright unavailable: {error}"})
+        try:
+            wait_ms = int(arguments.get("wait_ms", 500))
+        except (TypeError, ValueError):
+            wait_ms = 500
+        wait_ms = max(0, min(5000, wait_ms))
+        try:
+            max_chars = int(arguments.get("max_chars", 12000))
+        except (TypeError, ValueError):
+            max_chars = 12000
+        max_chars = max(1000, min(20000, max_chars))
+        timeout = 60
+        blocked: list[str] = []
+        started = time.time()
+        try:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(
+                    executable_path=executable,
+                    headless=True,
+                    args=[
+                        "--disable-background-networking",
+                        "--disable-extensions",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                        "--disable-sync",
+                        "--disable-component-update",
+                    ],
+                )
+                try:
+                    context = browser.new_context(
+                        viewport={"width": 1280, "height": 720}
+                    )
+                    page = context.new_page()
+                    page.set_default_timeout(timeout * 1000)
+
+                    def route_handler(route):
+                        allowed, _reason = self._validate_public_url(
+                            route.request.url
+                        )
+                        if allowed is None:
+                            blocked.append(route.request.url)
+                            route.abort()
+                            return
+                        route.continue_()
+
+                    page.route("**/*", route_handler)
+                    response = page.goto(
+                        validated,
+                        wait_until="domcontentloaded",
+                        timeout=timeout * 1000,
+                    )
+                    if wait_ms:
+                        page.wait_for_timeout(wait_ms)
+                    final = page.url
+                    final_ok, final_error = self._validate_public_url(final)
+                    if final_ok is None:
+                        return json.dumps(
+                            {"error": f"final page URL blocked: {final_error}"}
+                        )
+                    title = page.title()
+                    try:
+                        text = page.inner_text("body")[:max_chars]
+                    except Exception:
+                        text = ""
+                    links = page.eval_on_selector_all(
+                        "a[href]",
+                        "els => els.slice(0, 100).map(e => e.href)",
+                    )
+                    links = [
+                        link
+                        for link in links
+                        if isinstance(link, str)
+                        and link.startswith(("http://", "https://"))
+                    ]
+                    duration = round(time.time() - started, 3)
+                    result = {
+                        "url": url,
+                        "final_url": final,
+                        "status_code": response.status if response else None,
+                        "title": title,
+                        "text": text,
+                        "links": links,
+                        "blocked_requests": len(blocked),
+                        "blocked_sample": blocked[:10],
+                        "duration_seconds": duration,
+                    }
+                    self.storage.add_event(
+                        self.task_id,
+                        self.agent,
+                        "browse_page",
+                        {
+                            "url": url,
+                            "final_url": final,
+                            "status_code": result["status_code"],
+                            "title": title,
+                            "text_chars": len(text),
+                            "blocked_requests": len(blocked),
+                            "duration_seconds": duration,
+                        },
+                    )
+                    return json.dumps(result)
+                finally:
+                    browser.close()
+        except Exception as error:  # noqa: BLE001
+            return json.dumps({"error": f"browse failed: {error}"})
 
     def _report_blocked(self, arguments: dict) -> str:
         reason = str(arguments.get("reason", "")).strip()
