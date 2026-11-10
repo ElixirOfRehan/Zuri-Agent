@@ -29,6 +29,7 @@ class Settings:
     hr_spec_path: Path
     reflector_model: str = "deepseek-flash"
     reflection_enabled: bool = True
+    resilience_model: str = "deepseek-v4-pro"
     request_timeout_s: int = 120
     max_read_bytes: int = 65_536
     max_write_bytes: int = 1_000_000
@@ -100,6 +101,10 @@ class Settings:
             .strip()
             .lower()
             not in {"0", "false", "no", "off"},
+            resilience_model=os.getenv(
+                "ZURI_RESILIENCE_MODEL",
+                os.getenv("ZURI_BOSS_MODEL", "deepseek-v4-pro"),
+            ).strip(),
             request_timeout_s=int(os.getenv("ZURI_REQUEST_TIMEOUT_S", "120")),
             thinking=os.getenv("ZURI_THINKING", "disabled").strip().lower(),
         )

@@ -7,7 +7,7 @@ actually done.
 **Core promise:** you can see every action and every artifact. No task succeeds
 because an AI said so; it succeeds only when the evidence matches the ledger.
 
-Status: **Slice 1B implemented — awaiting user confirmation.** No later slice
+Status: **Slice 1C implemented — awaiting user confirmation.** No later slice
 started.
 
 ## Quick start
@@ -107,6 +107,21 @@ After a task is independently verified, the agent reflects on it. Safe changes
 automatically and create a new profile version. Sensitive changes (tools,
 model, scope, system prompt, risk, initiative, approval policy) become **pending
 changes** that need your approval.
+
+## Blocked tasks and resilience
+
+When a worker cannot finish, it calls `report_blocked` with a reason. The system
+then:
+
+- stops immediately if the **goal itself** is disallowed (policy/legal),
+- otherwise plans up to 3 compliant alternatives (another tool, another agent,
+  smaller steps, or asking you for missing input),
+- verifies every attempt,
+- marks the task `blocked` if nothing works, with every attempt and what is
+  needed.
+
+`zuri explain` shows the attempts. Policy checks are heuristic hard stops, not a
+legal opinion. They never silently fake success.
 
 Each agent gets only the tools in its profile. System agents (`boss`, `hr`,
 `worker`) cannot be deleted or re-created by the user.

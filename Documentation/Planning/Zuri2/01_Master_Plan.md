@@ -341,6 +341,8 @@ viewer. Plan: `03_Slice1B_Agent_Mind.md`.
 
 ### Slice 1C — Resilience and creative problem solving v1
 
+Status: **implemented, awaiting user confirmation.**
+
 Blocked reasons, bounded alternative generation, sub-task decomposition,
 delegation to other agents, user escalation, policy/legal hard stops.
 Plan: `04_Slice1C_Resilience.md`.

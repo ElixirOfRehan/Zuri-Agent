@@ -106,6 +106,7 @@ class Budget(BaseModel):
     max_steps: int = Field(default=12, ge=1, le=50)
     max_tokens: int = Field(default=30_000, ge=500, le=200_000)
     max_cost_usd: float = Field(default=0.10, gt=0, le=5.0)
+    max_attempts: int = Field(default=3, ge=0, le=5)
 
 
 class TaskContract(BaseModel):
@@ -326,6 +327,32 @@ class WorkerOutcome:
     steps: int = 0
     error: str | None = None
     tool_calls: int = 0
+    blocked_reason: str | None = None
+    blocked_detail: str = ""
+    blocked_needed: str = ""
+    goal_blocked: bool = False
+
+
+class Alternative(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    approach: str
+    agent_id: str | None = None
+    risk: Literal["low", "medium", "high"] = "low"
+    rationale: str = ""
+    steps: list[str] = []
+
+    @field_validator("approach")
+    @classmethod
+    def _approach_not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("approach must not be empty")
+        return value.strip()
+
+    @field_validator("steps")
+    @classmethod
+    def _steps_clean(cls, value: list[str]) -> list[str]:
+        return [step.strip() for step in value if step.strip()][:10]
 
 
 @dataclass

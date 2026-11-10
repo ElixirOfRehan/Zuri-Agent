@@ -13,8 +13,9 @@
     success.
   - Specialists must be genuinely powerful (tools + SOPs + memory + checks).
   - Instagram was only an example; **not scheduled**.
-- Current step: **Slice 1B implemented and internally verified — awaiting user
-  confirmation.** Slice 1C (Resilience) is next only after confirmation.
+- Current step: **Slice 1C implemented and internally verified — awaiting user
+  confirmation.** Slice 1D (Company kernel/dashboard) is next only after
+  confirmation.
 - Slice 1A evidence (2026-11-09):
   - 29 automated tests pass.
   - HR created proposal `p_e5bd52ef05` → agent `notes` (write_file only).
@@ -67,6 +68,24 @@
   - Commands: `agent mind/remember/forget/style/rollback/changes/
     approve-change/reject-change`; `zuri explain` shows the learning summary.
   - The assistant owns testing; the user does not run test commands.
+- Slice 1C implemented (2026-11-10):
+  - 67 automated tests pass.
+  - `report_blocked` control tool with reasons: policy_legal, missing_input,
+    missing_access, tool_unavailable, external_failure, ambiguity.
+  - Policy hard stops for disallowed goals/alternatives; no illegal/ToS bypass.
+  - Bounded alternative planner (up to 3): another agent, different tool,
+    smaller steps, or ask the user; each attempt is verified.
+  - Budget-limited attempts; blocked status and report with every attempt.
+  - Live policy block: `t_1b6d4837edff` (credential theft) stopped before
+    planning; no API cost; explain/last show the reason.
+  - Live resilience loop: `t_5c896fd1d26b` — simulated blocked notes attempt,
+    real DeepSeek planner proposed alternatives, real worker succeeded on
+    attempt 2; file verified; ~$0.001904.
+  - `zuri explain` shows attempts and "succeeded after N attempts"; blocked
+    tasks show why and what is needed.
+  - Test-only `assistant` agent created during the live resilience test was
+    soft-deleted with two confirmations (cleanup).
+- Next: 1D Company kernel/dashboard after user confirmation.
 - New requirements (2026-11-09):
   - **Dynamic agent mind:** create an agent with little detail; it builds a
     versioned profile/SOP/memory from verified work and user feedback. User can
@@ -122,10 +141,10 @@
 
 ## Next
 
-- 1B is internally verified and awaiting user confirmation.
-- After confirmation: implement 1C Resilience (blocked reasons, alternatives,
-  sub-tasks/other agents, legal/policy hard stops, budgets).
-- Then 1D Company kernel/dashboard, then the chat UI.
+- 1C is internally verified and awaiting user confirmation.
+- After confirmation: implement 1D Company kernel (queue/scheduler, approvals
+  inbox, budgets/cost ledger, dashboard timeline/evidence/mind viewer).
+- Then the chat UI.
 - The user gives goals in chat; no command homework.
 - The assistant runs all tests and reports plain-language results.
 

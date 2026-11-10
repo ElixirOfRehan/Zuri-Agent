@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from .config import Settings
 from .models import (
     AgentSpec,
+    Alternative,
     MemoryEntry,
     ReflectionResult,
     TaskContract,
@@ -330,6 +331,7 @@ class DeepSeekLLM:
         toolset: ToolSet,
         task_id: str,
         memory: list[MemoryEntry] | None = None,
+        attempt_context: str | None = None,
     ) -> WorkerOutcome:
         model = worker_spec.resolve_model(self.settings) or self.settings.worker_model
         style = worker_spec.effective_style()
@@ -345,6 +347,12 @@ class DeepSeekLLM:
             context += "\nRelevant evidence-backed memory:\n" + "\n".join(
                 f"- [{entry.kind}] {entry.text}" for entry in memory[-10:]
             )
+        context += (
+            "\n\nIf you cannot complete the task, call report_blocked with a "
+            "reason and what is needed. Never claim success when blocked."
+        )
+        if attempt_context:
+            context += "\n\nRetry guidance:\n" + attempt_context
         messages: list[dict] = [
             {
                 "role": "system",
@@ -421,6 +429,20 @@ class DeepSeekLLM:
                             "content": result,
                         }
                     )
+                    if toolset.blocked is not None:
+                        data = toolset.blocked
+                        self.storage.add_event(
+                            task_id, "worker", "blocked", data
+                        )
+                        return WorkerOutcome(
+                            final_message="",
+                            steps=steps,
+                            tool_calls=tool_calls,
+                            blocked_reason=data.get("reason"),
+                            blocked_detail=data.get("detail", ""),
+                            blocked_needed=data.get("needed", ""),
+                            goal_blocked=bool(data.get("goal_blocked", False)),
+                        )
                 continue
             final_message = message.content or ""
             self.storage.add_event(
@@ -440,6 +462,96 @@ class DeepSeekLLM:
             tool_calls=tool_calls,
             error="budget exceeded: max_steps",
         )
+
+    def plan_alternatives(
+        self,
+        task_id: str,
+        request: str,
+        contract: TaskContract,
+        profile: AgentSpec,
+        blocked_reason: str,
+        blocked_detail: str,
+        blocked_needed: str,
+        attempts: list[dict],
+        assignees: list[AgentSpec],
+    ) -> list[Alternative]:
+        model = self.settings.resilience_model or self.settings.boss_model
+        system = (
+            "You are the resilience planner of a small AI company. A worker is "
+            "blocked. Propose up to 3 safe alternative approaches.\n\n"
+            "Return ONLY JSON: {\"alternatives\": [ {\"approach\": string, "
+            "\"agent_id\": string or null, \"risk\": \"low|medium|high\", "
+            "\"rationale\": string, \"steps\": [string]} ]}\n\n"
+            "Rules:\n"
+            "- Alternatives must be legal, within platform rules and permissions.\n"
+            "- Never propose bypassing a license, DRM, paywall, authentication or "
+            "access control.\n"
+            "- You may use a different available agent, another tool, a smaller "
+            "sub-task, or a request for missing input.\n"
+            "- If the goal itself is disallowed, return an empty list.\n"
+            "- Prefer low-risk alternatives; include steps.\n"
+            "- Do not repeat an approach that already failed."
+        )
+        payload = {
+            "request": request,
+            "contract": contract.model_dump(),
+            "agent": {
+                "id": profile.id,
+                "name": profile.name,
+                "tools": profile.tools,
+                "description": profile.description,
+            },
+            "blocked": {
+                "reason": blocked_reason,
+                "detail": blocked_detail,
+                "needed": blocked_needed,
+            },
+            "previous_attempts": attempts,
+            "available_agents": [
+                {
+                    "id": spec.id,
+                    "name": spec.name,
+                    "description": spec.description,
+                    "tools": spec.tools,
+                }
+                for spec in assignees
+            ],
+        }
+        messages: list[dict] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(payload, indent=2, ensure_ascii=False)},
+        ]
+        last_error = ""
+        for _attempt in range(2):
+            message = self._chat(
+                model=model,
+                messages=messages,
+                agent="resilience",
+                task_id=task_id,
+                response_format={"type": "json_object"},
+                temperature=0.2,
+            )
+            content = _strip_fences(message.content or "")
+            try:
+                data = json.loads(content)
+                raw = data.get("alternatives", [])
+                if not isinstance(raw, list):
+                    raise ValueError("alternatives must be a list")
+                return [Alternative.model_validate(item) for item in raw[:3]]
+            except (json.JSONDecodeError, ValidationError, ValueError) as error:
+                last_error = str(error)
+                messages = messages + [
+                    {"role": "assistant", "content": content},
+                    {
+                        "role": "user",
+                        "content": (
+                            "That plan is invalid: "
+                            + last_error
+                            + "\nReturn corrected JSON only."
+                        ),
+                    },
+                ]
+        raise ValueError(f"Resilience planner failed: {last_error}")
 
     @staticmethod
     def _log_arguments(name: str, arguments: dict) -> dict:

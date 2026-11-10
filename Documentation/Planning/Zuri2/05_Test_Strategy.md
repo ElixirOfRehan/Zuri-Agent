@@ -102,6 +102,22 @@ user is not expected to run commands or interpret raw logs.
 - [ ] reflection prompt injection from file content
 - [ ] memory cap/compaction over hundreds of tasks
 
+### Policy and resilience (1C)
+- [x] goal policy block before planning (live + unit)
+- [x] `report_blocked` tool and blocked reasons
+- [x] alternative planner uses another agent
+- [x] every alternative is verified
+- [x] exhausted alternatives produce `blocked` with attempts
+- [x] alternatives are filtered by policy
+- [x] zero alternatives allowed -> blocked
+- [x] `goal_blocked` stops without planning alternatives
+- [x] Liar Test remains rejected
+- [x] live alternative loop (real planner + real worker)
+- [ ] budget exhaustion during alternatives
+- [ ] planner invalid JSON live retry
+- [ ] concurrent alternative attempts
+- [ ] policy false-positive/negative review
+
 ### Kernel and assignment
 - [x] Boss gets the assignee list
 - [x] unknown assignee rejected
@@ -171,10 +187,10 @@ user is not expected to run commands or interpret raw logs.
 
 ## Current status
 
-- 58 automated tests pass.
+- 67 automated tests pass.
 - Liar Test passes.
-- Live verified tasks through Slice 1B; reflection adds evidence-backed
-  lessons only from verified work.
+- Live verified tasks through Slice 1C; reflection adds evidence-backed
+  lessons only from verified work; blocked/alternative paths are live-tested.
 
 ## Known limits
 

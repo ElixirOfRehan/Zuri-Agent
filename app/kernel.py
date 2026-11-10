@@ -17,24 +17,35 @@ from .models import (
     TaskContract,
     TaskStatus,
 )
+from .policy import Policy
 from .registry import ALLOWED_MODELS, NON_ASSIGNABLE, AgentRegistry
 from .storage import Storage, utc_now
 from .tools import KNOWN_TOOLS, ToolSet
 from .verifier import Verifier
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    TaskStatus.CREATED.value: {TaskStatus.PLANNED.value, TaskStatus.FAILED.value},
+    TaskStatus.CREATED.value: {
+        TaskStatus.PLANNED.value,
+        TaskStatus.BLOCKED.value,
+        TaskStatus.FAILED.value,
+    },
     TaskStatus.PLANNED.value: {
         TaskStatus.AWAITING_APPROVAL.value,
         TaskStatus.RUNNING.value,
+        TaskStatus.BLOCKED.value,
         TaskStatus.FAILED.value,
     },
     TaskStatus.AWAITING_APPROVAL.value: {
         TaskStatus.RUNNING.value,
+        TaskStatus.BLOCKED.value,
         TaskStatus.CANCELLED.value,
         TaskStatus.FAILED.value,
     },
-    TaskStatus.RUNNING.value: {TaskStatus.VERIFYING.value, TaskStatus.FAILED.value},
+    TaskStatus.RUNNING.value: {
+        TaskStatus.VERIFYING.value,
+        TaskStatus.BLOCKED.value,
+        TaskStatus.FAILED.value,
+    },
     TaskStatus.VERIFYING.value: {TaskStatus.SUCCEEDED.value, TaskStatus.FAILED.value},
     TaskStatus.SUCCEEDED.value: {TaskStatus.VERIFYING.value},
     TaskStatus.FAILED.value: {TaskStatus.VERIFYING.value},
@@ -51,6 +62,7 @@ class Kernel:
         self.registry = AgentRegistry(settings, self.storage)
         self.reflector = Reflector(settings, self.storage, self.llm)
         self.verifier = Verifier(settings, self.storage)
+        self.policy = Policy()
         self._boss_agent: Boss | None = None
         self._hr_spec: AgentSpec | None = None
 
@@ -111,6 +123,28 @@ class Kernel:
     def plan_and_run(self, request: str, auto_approve: bool = False) -> str:
         task_id = self.storage.create_task(request)
         self.storage.add_event(task_id, "kernel", "task_created", {"request": request})
+        policy_reason = self.policy.forbidden_reason(request)
+        if policy_reason:
+            self.storage.add_event(
+                task_id,
+                "kernel",
+                "policy_block",
+                {"stage": "goal", "reason": policy_reason},
+            )
+            self.storage.add_event(
+                task_id,
+                "kernel",
+                "resilience_exhausted",
+                {
+                    "reason": "policy_legal",
+                    "detail": policy_reason,
+                    "needed": "A compliant goal.",
+                    "attempts": [],
+                },
+            )
+            self._transition(task_id, TaskStatus.BLOCKED.value)
+            self._save_report(task_id)
+            return task_id
         assignees = self.registry.assignable()
         if not assignees:
             self.storage.add_event(
@@ -204,24 +238,192 @@ class Kernel:
         if task is None or not task.get("contract_json"):
             raise ValueError("task has no contract")
         contract = TaskContract.model_validate_json(task["contract_json"])
-        worker_spec: AgentSpec | None = None
-        if worker_mode == "llm":
-            worker_spec = self.validate_assignee(contract.assignee)
+        if worker_mode == "liar":
+            self._execute_liar(task_id, contract)
+            return
+        policy_reason = self.policy.forbidden_reason(
+            task["request"] + "\n" + contract.objective
+        )
+        if policy_reason:
+            self.storage.add_event(
+                task_id,
+                "kernel",
+                "policy_block",
+                {"stage": "contract", "reason": policy_reason},
+            )
+            self._block_task(
+                task_id,
+                "policy_legal",
+                policy_reason,
+                "A compliant goal.",
+                [],
+            )
+            return
         self._transition(task_id, TaskStatus.RUNNING.value)
+        profile = self.validate_assignee(contract.assignee)
+        attempts: list[dict] = []
+        outcome, success, results = self._attempt_worker(
+            task_id, contract, profile, None
+        )
+        attempts.append(
+            self._attempt_record(1, profile, "initial", outcome, results, success)
+        )
+        self.storage.add_event(
+            task_id, "kernel", "resilience_attempt", attempts[-1]
+        )
+        if success:
+            self._succeed(task_id)
+            return
+
+        reason, detail, needed, goal_blocked = self._blocked_from(outcome, results)
+        if goal_blocked:
+            self._block_task(task_id, "policy_legal", detail, needed, attempts)
+            return
+        max_alternatives = contract.budget.max_attempts
+        if max_alternatives <= 0:
+            self._block_task(task_id, reason, detail, needed, attempts)
+            return
+        try:
+            alternatives = self._plan_alternatives(
+                task_id, contract, profile, reason, detail, needed, attempts
+            )
+        except Exception as error:  # noqa: BLE001
+            self._block_task(
+                task_id,
+                "resilience_planner_failed",
+                str(error),
+                "",
+                attempts,
+            )
+            return
+
+        compliant = []
+        for alternative in alternatives:
+            allowed, why = self.policy.alternative_allowed(alternative)
+            if allowed:
+                compliant.append(alternative)
+            else:
+                self.storage.add_event(
+                    task_id,
+                    "kernel",
+                    "alternative_rejected_policy",
+                    {"approach": alternative.approach, "reason": why},
+                )
+        if not compliant:
+            self._block_task(
+                task_id,
+                reason,
+                detail + " (no compliant alternatives)",
+                needed,
+                attempts,
+            )
+            return
+        self.storage.add_event(
+            task_id,
+            "kernel",
+            "resilience_planned",
+            {
+                "alternatives": [
+                    alternative.model_dump() for alternative in compliant
+                ]
+            },
+        )
+
+        final_reason, final_detail, final_needed = reason, detail, needed
+        for index, alternative in enumerate(
+            compliant[:max_alternatives], start=2
+        ):
+            if self._budget_exceeded(task_id, contract):
+                final_reason = "budget_exceeded"
+                final_detail = "task budget exhausted before another alternative"
+                final_needed = "A larger budget or a smaller task."
+                break
+            agent_id = alternative.agent_id or profile.id
+            try:
+                alt_profile = self.validate_assignee(agent_id)
+            except ValueError as error:
+                self.storage.add_event(
+                    task_id,
+                    "kernel",
+                    "alternative_skipped",
+                    {"agent": agent_id, "reason": str(error)},
+                )
+                continue
+            guidance = (
+                f"Attempt {index}. The previous attempt was blocked or failed: "
+                f"{final_reason}: {final_detail}. Use this alternative approach: "
+                f"{alternative.approach}. "
+                + (
+                    "Steps: " + "; ".join(alternative.steps) + ". "
+                    if alternative.steps
+                    else ""
+                )
+                + "Do not repeat the failed approach. If still blocked, call "
+                "report_blocked."
+            )
+            outcome, success, results = self._attempt_worker(
+                task_id, contract, alt_profile, guidance
+            )
+            attempt = self._attempt_record(
+                index, alt_profile, alternative.approach, outcome, results, success
+            )
+            attempts.append(attempt)
+            self.storage.add_event(
+                task_id, "kernel", "resilience_attempt", attempt
+            )
+            if success:
+                self._succeed(task_id)
+                return
+            final_reason, final_detail, final_needed, goal_blocked = (
+                self._blocked_from(outcome, results)
+            )
+            if goal_blocked:
+                final_reason = "policy_legal"
+                break
+        self._block_task(
+            task_id, final_reason, final_detail, final_needed, attempts
+        )
+
+    def _execute_liar(self, task_id: str, contract: TaskContract) -> None:
+        self._transition(task_id, TaskStatus.RUNNING.value)
+        toolset = ToolSet(self.settings, self.storage, task_id, "worker")
+        outcome = LiarWorker(self.storage).run(contract, toolset, task_id)
+        self._transition(task_id, TaskStatus.VERIFYING.value)
+        results = self.verifier.run(task_id, contract)
+        success = bool(results) and all(result.passed for result in results)
+        self._transition(
+            task_id,
+            TaskStatus.SUCCEEDED.value if success else TaskStatus.FAILED.value,
+        )
+        self._save_report(task_id)
+
+    def _make_worker(
+        self,
+        profile: AgentSpec,
+        memory: list[MemoryEntry],
+        attempt_context: str | None,
+    ):
+        return LLMWorker(
+            profile, self.llm, memory=memory, attempt_context=attempt_context
+        )
+
+    def _attempt_worker(
+        self,
+        task_id: str,
+        contract: TaskContract,
+        profile: AgentSpec,
+        attempt_context: str | None,
+    ):
         toolset = ToolSet(
             self.settings,
             self.storage,
             task_id,
             "worker",
-            allowed_tools=worker_spec.tools if worker_spec else None,
+            allowed_tools=profile.tools,
         )
-        if worker_mode == "liar":
-            worker = LiarWorker(self.storage)
-        else:
-            if worker_spec is None:
-                raise ValueError("no worker spec for LLM execution")
-            memory = self.registry.load_memory(worker_spec.id)
-            worker = LLMWorker(worker_spec, self.llm, memory=memory)
+        worker = self._make_worker(
+            profile, self.registry.load_memory(profile.id), attempt_context
+        )
         outcome = worker.run(contract, toolset, task_id)
         if outcome.error:
             self.storage.add_event(
@@ -230,14 +432,80 @@ class Kernel:
                 "error",
                 {"stage": "worker", "error": outcome.error},
             )
-        self._transition(task_id, TaskStatus.VERIFYING.value)
         results = self.verifier.run(task_id, contract)
         success = bool(results) and all(result.passed for result in results)
-        self._transition(
-            task_id,
-            TaskStatus.SUCCEEDED.value if success else TaskStatus.FAILED.value,
+        return outcome, success, results
+
+    @staticmethod
+    def _attempt_record(
+        index: int,
+        profile: AgentSpec,
+        approach: str,
+        outcome,
+        results,
+        success: bool,
+    ) -> dict:
+        return {
+            "attempt": index,
+            "agent": profile.id,
+            "approach": approach,
+            "success": success,
+            "blocked_reason": outcome.blocked_reason,
+            "detail": outcome.blocked_detail or outcome.error or "",
+            "failed_checks": [
+                result.name for result in results if not result.passed
+            ],
+        }
+
+    @staticmethod
+    def _blocked_from(outcome, results) -> tuple[str, str, str, bool]:
+        if outcome.blocked_reason:
+            return (
+                outcome.blocked_reason,
+                outcome.blocked_detail,
+                outcome.blocked_needed,
+                outcome.goal_blocked,
+            )
+        failed = [result.name for result in results if not result.passed]
+        detail = outcome.error or (
+            "failed checks: " + ", ".join(failed) if failed else "no checks passed"
         )
-        if success and self.settings.reflection_enabled:
+        return "verification_failed", detail, "", False
+
+    def _plan_alternatives(
+        self,
+        task_id: str,
+        contract: TaskContract,
+        profile: AgentSpec,
+        reason: str,
+        detail: str,
+        needed: str,
+        attempts: list[dict],
+    ):
+        task = self.storage.get_task(task_id)
+        request = task["request"] if task else contract.objective
+        return self.llm.plan_alternatives(
+            task_id,
+            request,
+            contract,
+            profile,
+            reason,
+            detail,
+            needed,
+            attempts,
+            self.registry.assignable(),
+        )
+
+    def _budget_exceeded(self, task_id: str, contract: TaskContract) -> bool:
+        return (
+            self.storage.total_cost(task_id) > contract.budget.max_cost_usd
+            or self.storage.total_tokens(task_id) > contract.budget.max_tokens
+        )
+
+    def _succeed(self, task_id: str) -> None:
+        self._transition(task_id, TaskStatus.VERIFYING.value)
+        self._transition(task_id, TaskStatus.SUCCEEDED.value)
+        if self.settings.reflection_enabled:
             try:
                 self.reflect_task(task_id)
             except Exception as error:  # noqa: BLE001 - reflection must not undo success
@@ -247,6 +515,28 @@ class Kernel:
                     "reflection_error",
                     {"error": str(error)},
                 )
+        self._save_report(task_id)
+
+    def _block_task(
+        self,
+        task_id: str,
+        reason: str,
+        detail: str,
+        needed: str,
+        attempts: list[dict],
+    ) -> None:
+        self.storage.add_event(
+            task_id,
+            "kernel",
+            "resilience_exhausted",
+            {
+                "reason": reason,
+                "detail": detail,
+                "needed": needed,
+                "attempts": attempts,
+            },
+        )
+        self._transition(task_id, TaskStatus.BLOCKED.value)
         self._save_report(task_id)
 
     def reflect_task(self, task_id: str) -> dict:
@@ -531,6 +821,49 @@ class Kernel:
             lines.append("- No verification was run.")
         lines.append("")
 
+        resilience_attempts = [
+            event["data"]
+            for event in events
+            if event["type"] == "resilience_attempt"
+        ]
+        resilience_end = next(
+            (
+                event["data"]
+                for event in reversed(events)
+                if event["type"] == "resilience_exhausted"
+            ),
+            None,
+        )
+        policy_block = next(
+            (
+                event["data"]
+                for event in reversed(events)
+                if event["type"] == "policy_block"
+            ),
+            None,
+        )
+        if resilience_attempts or resilience_end or policy_block:
+            lines.append("## Resilience")
+            if policy_block:
+                lines.append(
+                    f"- Policy block ({policy_block.get('stage', 'goal')}): "
+                    f"{policy_block.get('reason', 'disallowed')}"
+                )
+            for attempt in resilience_attempts:
+                status = "succeeded" if attempt.get("success") else "failed"
+                detail = attempt.get("detail") or "no detail"
+                lines.append(
+                    f"- Attempt {attempt.get('attempt')} "
+                    f"({attempt.get('agent')}, {attempt.get('approach')}): "
+                    f"{status} - {detail}"
+                )
+            if resilience_end:
+                lines.append(
+                    f"- Blocked: {resilience_end.get('reason')}. "
+                    f"Need: {resilience_end.get('needed') or 'user input'}."
+                )
+            lines.append("")
+
         lines.append("## Artifacts")
         if artifacts:
             for artifact in artifacts:
@@ -587,6 +920,15 @@ class Kernel:
                 f"Verified. All {len(verifications)} checks in the latest run "
                 "passed and every deliverable matches the ledger."
             )
+        elif task["status"] == TaskStatus.BLOCKED.value:
+            reason = (
+                resilience_end.get("reason") if resilience_end else "blocked"
+            )
+            needed = (
+                resilience_end.get("needed") if resilience_end else ""
+            )
+            needed_text = (needed or "user input/approval").rstrip(".")
+            lines.append(f"Blocked: {reason}. Need: {needed_text}.")
         elif task["status"] == TaskStatus.AWAITING_APPROVAL.value:
             lines.append("Waiting for user approval before work starts.")
         else:

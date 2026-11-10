@@ -29,14 +29,21 @@ class LLMWorker:
         spec: AgentSpec,
         llm: DeepSeekLLM,
         memory: list[MemoryEntry] | None = None,
+        attempt_context: str | None = None,
     ):
         self.spec = spec
         self.llm = llm
         self.memory = memory or []
+        self.attempt_context = attempt_context
 
     def run(self, contract: TaskContract, toolset: ToolSet, task_id: str) -> WorkerOutcome:
         return self.llm.run_worker(
-            contract, self.spec, toolset, task_id, memory=self.memory
+            contract,
+            self.spec,
+            toolset,
+            task_id,
+            memory=self.memory,
+            attempt_context=self.attempt_context,
         )
 
 

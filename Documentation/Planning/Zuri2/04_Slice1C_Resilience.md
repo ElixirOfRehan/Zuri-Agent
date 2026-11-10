@@ -1,6 +1,6 @@
 # Slice 1C — Resilience and creative problem solving v1
 
-Status: planned; starts only after Slice 1B is confirmed.
+Status: **implemented 2026-11-10 — awaiting user confirmation**
 Depends on: 1A (agents/assignees) and 1B (profile/memory).
 
 ## 1. Goal

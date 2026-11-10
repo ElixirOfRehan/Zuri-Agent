@@ -259,6 +259,40 @@ Verification:
 
 Awaiting user confirmation of 1B before 1C.
 
+## 2026-11-10 — Slice 1C implemented (internal)
+
+Scope delivered:
+- `report_blocked` control tool available to every agent; reasons:
+  policy_legal, missing_input, missing_access, tool_unavailable,
+  external_failure, ambiguity.
+- `WorkerOutcome` carries blocked reason/detail/needed/goal_blocked.
+- `Policy` hard stops for disallowed goals and alternatives (credential theft,
+  malware, license/DRM bypass, unauthorized access, destructive disk/delete).
+- `DeepSeekLLM.plan_alternatives`: up to 3 safe alternatives with another
+  agent, different approach, smaller steps, or user input.
+- Kernel resilience loop: initial attempt + up to `budget.max_attempts`
+  alternatives; verifies every attempt; agent can change; blocked status with
+  full attempt report. Policy/legal goal stops immediately.
+- `explain`/`last`/`show` show attempts, reason and what is needed.
+- `verify` refuses blocked tasks with a clear message.
+
+Live tests:
+- Policy block: `t_1b6d4837edff` (credential theft) blocked before planning,
+  zero cost.
+- Resilience loop: `t_5c896fd1d26b` — first attempt simulated blocked, real
+  DeepSeek planner proposed 3 alternatives, real worker succeeded on attempt 2;
+  file verified; ~$0.001904. Report/explain show both attempts.
+- Test-only `assistant` agent was soft-deleted with two confirmations.
+
+Verification:
+- 67 tests pass (policy, blocked tool, alternative agent, exhaustion,
+  alternative policy filter, zero alternatives, goal_blocked, liar).
+- Liar Test still passes.
+- No illegal/ToS bypass: policy block stops; alternatives are filtered.
+
+Awaiting user confirmation of 1C before 1D.
+
+
 
 ## 2026-11-10 — 1A confirmed; understanding + test ownership
 

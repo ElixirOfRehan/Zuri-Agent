@@ -27,7 +27,7 @@ def test_tool_filtering_definitions_and_execution(tmp_path):
         settings, storage, task_id, "worker", allowed_tools=["read_file"]
     )
     names = [item["function"]["name"] for item in toolset.definitions()]
-    assert names == ["read_file"]
+    assert names == ["read_file", "report_blocked"]
     result = toolset.execute("write_file", {"path": "x.txt", "content": "x"})
     assert "not granted" in result
 

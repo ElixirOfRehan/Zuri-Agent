@@ -114,6 +114,16 @@ def cmd_verify(args: argparse.Namespace) -> int:
     settings = Settings.load()
     kernel = Kernel(settings)
     try:
+        task = kernel.storage.get_task(args.task_id)
+        if task is None:
+            print(f"ERROR: task not found: {args.task_id}")
+            return 2
+        if task["status"] == "blocked":
+            print(
+                f"Task is blocked; nothing to verify. "
+                f"Use: zuri explain {args.task_id}"
+            )
+            return 1
         kernel.reverify(args.task_id)
         task = kernel.storage.get_task(args.task_id)
         _print_task_summary(task)
@@ -190,12 +200,32 @@ def cmd_last(args: argparse.Namespace) -> int:
             ),
             None,
         )
+        resilience_end = next(
+            (
+                event["data"]
+                for event in reversed(data["events"])
+                if event["type"] == "resilience_exhausted"
+            ),
+            None,
+        )
+        attempts = [
+            event["data"]
+            for event in data["events"]
+            if event["type"] == "resilience_attempt"
+        ]
         print(f"Latest task: {task['id']}")
         print(f"Status:      {task['status']}")
         print(f"Assignee:    {contract['assignee'] if contract else '-'}")
         print(f"Request:     {task['request']}")
         if error:
             print(f"Reason:      {error}")
+        if resilience_end:
+            print(
+                f"Reason:      {resilience_end.get('reason')} "
+                f"(need: {resilience_end.get('needed') or 'user input'})"
+            )
+        if attempts:
+            print(f"Attempts:    {len(attempts)}")
         if checks:
             print(f"Checks:      {passed}/{len(checks)} passed (latest run)")
             for item in checks:
@@ -216,7 +246,10 @@ def cmd_last(args: argparse.Namespace) -> int:
         )
         print("")
         print(f"Full details: zuri show {task['id']}")
-        print("Re-check:     zuri verify-last")
+        if task["status"] == "blocked":
+            print(f"Explain:      zuri explain {task['id']}")
+        else:
+            print("Re-check:     zuri verify-last")
         return 0
     finally:
         kernel.close()
@@ -245,6 +278,27 @@ def cmd_explain(args: argparse.Namespace) -> int:
             ),
             None,
         )
+        attempts = [
+            event["data"]
+            for event in data["events"]
+            if event["type"] == "resilience_attempt"
+        ]
+        resilience_end = next(
+            (
+                event["data"]
+                for event in reversed(data["events"])
+                if event["type"] == "resilience_exhausted"
+            ),
+            None,
+        )
+        policy_block = next(
+            (
+                event["data"]
+                for event in reversed(data["events"])
+                if event["type"] == "policy_block"
+            ),
+            None,
+        )
 
         print(f"Task: {task['id']}")
         print(f"You asked: {task['request']}")
@@ -270,43 +324,68 @@ def cmd_explain(args: argparse.Namespace) -> int:
                 else:
                     detail = "exists"
                 print(f"    - {item['path']} {detail}")
+        elif policy_block:
+            print("The request was blocked by policy before planning.")
+            print(f"Reason: {policy_block.get('reason')}")
         else:
             print("The Boss could not create a valid plan.")
         print("")
         print("What happened:")
-        tool_events = [
-            event for event in data["events"] if event["type"] == "tool_call"
-        ]
-        if tool_events:
-            for event in tool_events:
-                payload = event["data"]
-                arguments = payload.get("arguments", {})
-                target = arguments.get("path") or arguments.get("name") or ""
-                print(
-                    f"  - The worker used {payload.get('name')} on {target or 'the workspace'}."
-                )
+        if policy_block and not contract:
+            print("  - No worker ran; the request was blocked before planning.")
         else:
-            print("  - The worker did not use any tools.")
-        if data["artifacts"]:
-            print("  - Files recorded as evidence:")
-            for artifact in data["artifacts"]:
-                print(
-                    f"      {artifact['path']} "
-                    f"({artifact['bytes']} bytes, sha256 {artifact['sha256'][:12]}...)"
-                )
-        else:
-            print("  - No files were recorded.")
-        if checks:
-            passed = sum(1 for item in checks if item["passed"])
-            print(f"  - The independent verifier ran {len(checks)} checks: "
-                  f"{passed} passed, {len(checks) - passed} failed.")
-            for item in checks:
-                if not item["passed"]:
-                    print(f"      FAIL: {item['name']} - {item['detail']}")
-        else:
-            print("  - No verification ran.")
+            tool_events = [
+                event for event in data["events"] if event["type"] == "tool_call"
+            ]
+            if tool_events:
+                for event in tool_events:
+                    payload = event["data"]
+                    arguments = payload.get("arguments", {})
+                    target = arguments.get("path") or arguments.get("name") or ""
+                    print(
+                        f"  - The worker used {payload.get('name')} on {target or 'the workspace'}."
+                    )
+            else:
+                print("  - The worker did not use any tools.")
+            if data["artifacts"]:
+                print("  - Files recorded as evidence:")
+                for artifact in data["artifacts"]:
+                    print(
+                        f"      {artifact['path']} "
+                        f"({artifact['bytes']} bytes, sha256 {artifact['sha256'][:12]}...)"
+                    )
+            else:
+                print("  - No files were recorded.")
+            if checks:
+                passed = sum(1 for item in checks if item["passed"])
+                print(f"  - The independent verifier ran {len(checks)} checks: "
+                      f"{passed} passed, {len(checks) - passed} failed.")
+                for item in checks:
+                    if not item["passed"]:
+                        print(f"      FAIL: {item['name']} - {item['detail']}")
+            else:
+                print("  - No verification ran.")
         if error:
             print(f"  - Error: {error}")
+        if policy_block:
+            print(f"  - Policy block: {policy_block.get('reason')}")
+        if attempts:
+            print("  - Attempts:")
+            for attempt in attempts:
+                status = "succeeded" if attempt.get("success") else "failed"
+                detail = attempt.get("detail") or "no detail"
+                print(
+                    f"      #{attempt.get('attempt')} {attempt.get('agent')} "
+                    f"[{attempt.get('approach')}]: {status} - {detail}"
+                )
+        if resilience_end:
+            needed = (
+                resilience_end.get("needed") or "user input"
+            ).rstrip(".")
+            print(
+                f"  - Blocked because: {resilience_end.get('reason')}. "
+                f"Need: {needed}."
+            )
         mind_update = next(
             (
                 event["data"]
@@ -334,6 +413,27 @@ def cmd_explain(args: argparse.Namespace) -> int:
                 "This means the file exists, it matches the fingerprint recorded "
                 "when it was written, and every acceptance check passed."
             )
+            if len(attempts) > 1:
+                print(f"It succeeded after {len(attempts)} attempts.")
+        elif task["status"] == "blocked":
+            print("Result: BLOCKED.")
+            if resilience_end:
+                needed = (
+                    resilience_end.get("needed") or "user input"
+                ).rstrip(".")
+                print(
+                    f"Reason: {resilience_end.get('reason')}. Need: {needed}."
+                )
+            if attempts:
+                print(
+                    "The system tried the safe alternatives above and stopped."
+                )
+            else:
+                print(
+                    "No work ran because the request is disallowed or blocked "
+                    "before execution."
+                )
+            print("Nothing was silently marked successful.")
         elif task["status"] == "awaiting_approval":
             print("Result: waiting for your approval before any work starts.")
         else:
@@ -365,6 +465,12 @@ def cmd_verify_last(args: argparse.Namespace) -> int:
             print("No tasks to verify.")
             return 0
         task_id = tasks[0]["id"]
+        task = kernel.storage.get_task(task_id)
+        if task and task["status"] == "blocked":
+            print(
+                f"Task is blocked; nothing to verify. Use: zuri explain {task_id}"
+            )
+            return 1
         kernel.reverify(task_id)
         task = kernel.storage.get_task(task_id)
         print(f"Task:   {task_id}")

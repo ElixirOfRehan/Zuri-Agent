@@ -63,10 +63,44 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "report_blocked",
+            "description": (
+                "Report that the task cannot be completed and why. Use this "
+                "instead of claiming success when blocked."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "enum": [
+                            "policy_legal",
+                            "missing_input",
+                            "missing_access",
+                            "tool_unavailable",
+                            "external_failure",
+                            "ambiguity",
+                        ],
+                    },
+                    "detail": {"type": "string"},
+                    "needed": {"type": "string"},
+                    "goal_blocked": {
+                        "type": "boolean",
+                        "description": "True only if the goal itself is disallowed.",
+                    },
+                },
+                "required": ["reason", "detail"],
+            },
+        },
+    },
 ]
 
 
 KNOWN_TOOLS = {"list_dir", "read_file", "write_file"}
+CONTROL_TOOLS = {"report_blocked"}
 
 
 class ToolSet:
@@ -83,15 +117,19 @@ class ToolSet:
         self.task_id = task_id
         self.agent = agent
         self.allowed = set(allowed_tools) if allowed_tools is not None else set(KNOWN_TOOLS)
+        self.blocked: dict | None = None
 
     def definitions(self) -> list[dict]:
         return [
             definition
             for definition in TOOL_DEFINITIONS
             if definition["function"]["name"] in self.allowed
+            or definition["function"]["name"] in CONTROL_TOOLS
         ]
 
     def execute(self, name: str, arguments: dict) -> str:
+        if name == "report_blocked":
+            return self._report_blocked(arguments)
         if name not in self.allowed:
             return json.dumps({"error": f"tool not granted to this agent: {name}"})
         try:
@@ -110,6 +148,26 @@ class ToolSet:
             return json.dumps({"error": f"filesystem: {error}"})
         except Exception as error:  # noqa: BLE001 - tool errors go back to the model
             return json.dumps({"error": f"tool failed: {error}"})
+
+    def _report_blocked(self, arguments: dict) -> str:
+        reason = str(arguments.get("reason", "")).strip()
+        allowed = {
+            "policy_legal",
+            "missing_input",
+            "missing_access",
+            "tool_unavailable",
+            "external_failure",
+            "ambiguity",
+        }
+        if reason not in allowed:
+            return json.dumps({"error": f"invalid blocked reason: {reason}"})
+        self.blocked = {
+            "reason": reason,
+            "detail": str(arguments.get("detail", "")).strip(),
+            "needed": str(arguments.get("needed", "")).strip(),
+            "goal_blocked": bool(arguments.get("goal_blocked", False)),
+        }
+        return json.dumps({"blocked": True, **self.blocked})
 
     def _list_dir(self, raw: str) -> str:
         if raw.strip() in ("", ".", "./", ".\\"):
