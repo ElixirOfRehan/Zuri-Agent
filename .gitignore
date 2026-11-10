@@ -1,0 +1,16 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+workspace/*
+!workspace/.gitkeep
+agents/.trash/
+agents/*/memory.jsonl
+*.log
+node_modules/
+dist/
+build/
+*.egg-info/
+.eval/

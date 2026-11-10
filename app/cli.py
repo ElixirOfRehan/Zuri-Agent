@@ -1,0 +1,633 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+from .config import Settings
+from .kernel import Kernel
+
+
+def _short(value: object, limit: int = 500) -> str:
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _print_task_summary(task: dict) -> None:
+    print(f"Task:    {task['id']}")
+    print(f"Status:  {task['status']}")
+    print(f"Created: {task['created_at']}")
+    print(f"Request: {task['request']}")
+    print("")
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    if not settings.has_api_key:
+        print("ERROR: DEEPSEEK_API_KEY is missing. Put it in the project .env file.")
+        return 2
+    kernel = Kernel(settings)
+    try:
+        task_id = kernel.plan_and_run(" ".join(args.request), args.auto_approve)
+        task = kernel.storage.get_task(task_id)
+        _print_task_summary(task)
+        if task["status"] == "awaiting_approval":
+            print(f"Approval needed. Run: zuri approve {task_id}")
+        else:
+            print(kernel.build_report(task_id))
+        return 0 if task["status"] in ("succeeded", "awaiting_approval") else 1
+    finally:
+        kernel.close()
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        data = kernel.task_data(args.task_id)
+        if args.json:
+            print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+            return 0
+        _print_task_summary(data["task"])
+        contract = data["contract"]
+        if contract:
+            print("Contract:")
+            print(f"  Objective: {contract['objective']}")
+            print(f"  Assignee: {contract['assignee']}")
+            print(f"  Risk: {contract['risk']} | Approval: {contract['approval_class']}")
+            print("  Deliverables:")
+            for item in contract["deliverables"]:
+                print(f"    - {item['path']}")
+            print("  Acceptance tests:")
+            for item in contract["acceptance_tests"]:
+                text = f" text={item['text']!r}" if item.get("text") else ""
+                print(f"    - {item['type']} {item['path']}{text}")
+            print("")
+        print("Timeline:")
+        for event in data["events"]:
+            print(
+                f"  [{event['event_id']}] {event['ts']} "
+                f"{event['agent']}/{event['type']} {_short(event['data'])}"
+            )
+        print("")
+        print("Artifacts:")
+        for artifact in data["artifacts"]:
+            print(
+                f"  - {artifact['path']} sha256={artifact['sha256']} "
+                f"{artifact['bytes']} bytes (artifact {artifact['id']})"
+            )
+        if not data["artifacts"]:
+            print("  (none)")
+        print("")
+        print("Verifications (latest run):")
+        for item in data["verifications"]:
+            marker = "PASS" if item["passed"] else "FAIL"
+            print(f"  [{marker}] {item['name']}: {item['detail']}")
+        if not data["verifications"]:
+            print("  (none)")
+        if data.get("verification_runs", 0) > 1:
+            print(
+                f"  (showing latest of {data['verification_runs']} runs; "
+                "older runs remain in the ledger)"
+            )
+        print("")
+        print("Cost:")
+        for item in data["costs"]:
+            print(
+                f"  - {item['agent']}/{item['model']}: "
+                f"{item['prompt_tokens']}+{item['completion_tokens']} tokens "
+                f"${item['cost_usd']:.6f}"
+            )
+        print(
+            f"  Total: {data['total_tokens']} tokens, "
+            f"${data['total_cost_usd']:.6f} (estimated)"
+        )
+        if data["task"].get("report"):
+            print("")
+            print(data["task"]["report"])
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        kernel.reverify(args.task_id)
+        task = kernel.storage.get_task(args.task_id)
+        _print_task_summary(task)
+        for item in kernel.storage.get_verifications(args.task_id):
+            marker = "PASS" if item["passed"] else "FAIL"
+            print(f"[{marker}] {item['name']}: {item['detail']}")
+        return 0 if task["status"] == "succeeded" else 1
+    finally:
+        kernel.close()
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        task = kernel.storage.get_task(args.task_id)
+        if task is None:
+            print(f"ERROR: task not found: {args.task_id}")
+            return 2
+        print(task.get("report") or kernel.build_report(args.task_id))
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_approve(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    if not settings.has_api_key:
+        print("ERROR: DEEPSEEK_API_KEY is missing. Put it in the project .env file.")
+        return 2
+    kernel = Kernel(settings)
+    try:
+        kernel.approve(args.task_id)
+        task = kernel.storage.get_task(args.task_id)
+        _print_task_summary(task)
+        print(kernel.build_report(args.task_id))
+        return 0 if task["status"] == "succeeded" else 1
+    finally:
+        kernel.close()
+
+
+def cmd_tasks(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        for task in kernel.storage.list_tasks(args.limit):
+            print(
+                f"{task['id']}  {task['created_at']}  {task['status']:<18} "
+                f"{task['request'][:80]}"
+            )
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_last(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        tasks = kernel.storage.list_tasks(1)
+        if not tasks:
+            print('No tasks yet. Run: zuri run "Create notes/hello.md with hello"')
+            return 0
+        task = tasks[0]
+        data = kernel.task_data(task["id"])
+        contract = data["contract"]
+        checks = data["verifications"]
+        passed = sum(1 for item in checks if item["passed"])
+        error = next(
+            (
+                event["data"].get("error")
+                for event in reversed(data["events"])
+                if event["type"] == "error" and event["data"].get("error")
+            ),
+            None,
+        )
+        print(f"Latest task: {task['id']}")
+        print(f"Status:      {task['status']}")
+        print(f"Assignee:    {contract['assignee'] if contract else '-'}")
+        print(f"Request:     {task['request']}")
+        if error:
+            print(f"Reason:      {error}")
+        if checks:
+            print(f"Checks:      {passed}/{len(checks)} passed (latest run)")
+            for item in checks:
+                if not item["passed"]:
+                    print(f"  FAIL {item['name']}: {item['detail']}")
+        else:
+            print("Checks:      none")
+        if data["artifacts"]:
+            print("Artifacts:")
+            for artifact in data["artifacts"]:
+                print(
+                    f"  - {artifact['path']} "
+                    f"sha256={artifact['sha256'][:16]}... {artifact['bytes']} bytes"
+                )
+        print(
+            f"Cost:        {data['total_tokens']} tokens, "
+            f"${data['total_cost_usd']:.6f} (estimated)"
+        )
+        print("")
+        print(f"Full details: zuri show {task['id']}")
+        print("Re-check:     zuri verify-last")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_verify_last(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        tasks = kernel.storage.list_tasks(1)
+        if not tasks:
+            print("No tasks to verify.")
+            return 0
+        task_id = tasks[0]["id"]
+        kernel.reverify(task_id)
+        task = kernel.storage.get_task(task_id)
+        print(f"Task:   {task_id}")
+        print(f"Status: {task['status']}")
+        for item in kernel.storage.get_verifications(task_id):
+            marker = "PASS" if item["passed"] else "FAIL"
+            print(f"[{marker}] {item['name']}: {item['detail']}")
+        return 0 if task["status"] == "succeeded" else 1
+    finally:
+        kernel.close()
+
+
+def cmd_guide(args: argparse.Namespace) -> int:
+    print("Zuri - simple test guide")
+    print("")
+    print("1. See the team:        zuri.cmd agent list")
+    print("2. Run a safe task:     zuri.cmd run \"Create notes/hello.md with the text 'hello'\"")
+    print("3. See the last result: zuri.cmd last")
+    print("4. Re-check it:         zuri.cmd verify-last")
+    print("5. Full raw timeline:   zuri.cmd show <task-id>")
+    print("")
+    print("Create an agent:")
+    print("  zuri.cmd agent create \"Create an agent named Notes that writes markdown.\"")
+    print("  zuri.cmd agent approve <proposal-id>")
+    print("Use it:")
+    print("  zuri.cmd run \"Use the notes agent to create work/notes.md with a checklist.\"")
+    print("")
+    print("Delete an agent (two confirmations):")
+    print("  zuri.cmd agent delete notes")
+    print("  step 1: type exactly  notes")
+    print("  step 2: type exactly  DELETE notes")
+    print("  anything else aborts and nothing is deleted.")
+    print("  restore: zuri.cmd agent restore notes")
+    return 0
+
+
+def cmd_ping(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    if not settings.has_api_key:
+        print("ERROR: DEEPSEEK_API_KEY is missing. Put it in the project .env file.")
+        return 2
+    kernel = Kernel(settings)
+    try:
+        reply = kernel.llm.ping()
+        print("API OK")
+        print(f"Model: {settings.worker_model}")
+        print(f"Reply: {reply[:120]}")
+        return 0
+    except Exception as error:  # noqa: BLE001
+        print(f"API FAILED: {error}")
+        return 1
+    finally:
+        kernel.close()
+
+
+def cmd_liar(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        result = kernel.liar_test()
+        print(f"Task: {result['task_id']}")
+        print(f"Status: {result['status']}")
+        for item in result["verifications"]:
+            marker = "PASS" if item["passed"] else "FAIL"
+            print(f"[{marker}] {item['name']}: {item['detail']}")
+        if result["liar_rejected"]:
+            print("LIAR TEST PASSED: the fake success claim was rejected.")
+            return 0
+        print("LIAR TEST FAILED: the system accepted a fake success claim.")
+        return 1
+    finally:
+        kernel.close()
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    settings.ensure()
+    kernel = Kernel(settings)
+    try:
+        print(f"Root:      {settings.root}")
+        print(f"Data:      {settings.data_dir}")
+        print(f"Workspace: {settings.workspace_dir}")
+        print(f"DB:        {settings.db_path} ({'present' if settings.db_path.exists() else 'not created yet'})")
+        print(f"API key:   {'SET' if settings.has_api_key else 'NOT SET'}")
+        print(f"Boss model:   {settings.boss_model}")
+        print(f"Worker model: {settings.worker_model}")
+        print(f"Boss spec:   {settings.boss_spec_path} ({'ok' if settings.boss_spec_path.exists() else 'MISSING'})")
+        print(f"Worker spec: {settings.worker_spec_path} ({'ok' if settings.worker_spec_path.exists() else 'MISSING'})")
+        print(f"HR spec:     {settings.hr_spec_path} ({'ok' if settings.hr_spec_path.exists() else 'MISSING'})")
+        print("Agents:")
+        for spec in kernel.registry.list_agents():
+            print(
+                f"  - {spec.id:<14} {spec.source:<7} {spec.model:<16} "
+                f"tools={','.join(spec.tools) or '-'}"
+            )
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_list(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        for spec in kernel.registry.list_agents():
+            print(
+                f"{spec.id:<16} {('enabled' if spec.enabled else 'disabled'):<9} "
+                f"{spec.model or '-':<16} tools={','.join(spec.tools) or '-':<28} "
+                f"{spec.name} - {spec.description}"
+            )
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_show(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        spec = kernel.registry.get(args.agent_id)
+        if spec is None:
+            print(f"ERROR: agent not found: {args.agent_id}")
+            return 2
+        print(json.dumps(spec.model_dump(), indent=2, ensure_ascii=False))
+        folder = kernel.registry.agents_dir / spec.id
+        versions = sorted((folder / "profiles").glob("v*.json"))
+        memory_file = folder / "memory.jsonl"
+        if memory_file.exists():
+            with open(memory_file, encoding="utf-8") as handle:
+                memory_lines = sum(1 for _ in handle)
+        else:
+            memory_lines = 0
+        print(f"Versions: {', '.join(path.stem for path in versions) or '(none)'}")
+        print(f"Memory entries: {memory_lines}")
+        history = kernel.registry.history(spec.id, 20)
+        if history:
+            print("History:")
+            for event in history:
+                print(
+                    f"  [{event['event_id']}] {event['ts']} {event['action']} "
+                    f"{json.dumps(event['data'], ensure_ascii=False)[:300]}"
+                )
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_create(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    if not settings.has_api_key:
+        print("ERROR: DEEPSEEK_API_KEY is missing. Put it in the project .env file.")
+        return 2
+    description = " ".join(args.description) if args.description else ""
+    if not description.strip():
+        try:
+            description = input(
+                "Describe the agent (or press Enter for a generalist): "
+            ).strip()
+        except EOFError:
+            description = ""
+    if not description.strip():
+        description = "Create a generalist file worker with a clear starting charter."
+    kernel = Kernel(settings)
+    try:
+        proposal = kernel.propose_agent(description)
+        print(f"Proposal: {proposal.proposal_id}")
+        print(json.dumps(proposal.spec.model_dump(), indent=2, ensure_ascii=False))
+        print("")
+        print(f"Approve: zuri agent approve {proposal.proposal_id}")
+        print(f"Reject:  zuri agent reject {proposal.proposal_id}")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_proposals(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        status = None if args.all else "pending"
+        proposals = kernel.registry.list_proposals(status)
+        if not proposals:
+            print("No proposals.")
+            return 0
+        for proposal in proposals:
+            print(
+                f"{proposal.proposal_id}  {proposal.status:<9}  "
+                f"{proposal.spec.id:<16}  {proposal.spec.name} - "
+                f"{proposal.spec.description}"
+            )
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_approve(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        proposal = kernel.registry.approve_proposal(args.proposal_id)
+        print(f"Agent '{proposal.spec.id}' created from {proposal.proposal_id}.")
+        print("Use it with: zuri run \"Use the <id> agent to ...\"")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_reject(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        proposal = kernel.registry.reject_proposal(args.proposal_id)
+        print(f"Proposal {proposal.proposal_id} rejected.")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_delete(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        spec = kernel.registry.get(args.agent_id)
+        if spec is None:
+            print(f"ERROR: agent not found: {args.agent_id}")
+            return 2
+        print(f"Agent: {spec.id}")
+        print(f"Name:  {spec.name}")
+        print(f"Model: {spec.model}")
+        print(f"Tools: {', '.join(spec.tools) or '-'}")
+        print("")
+        print("Two confirmations are required. Type anything else to abort.")
+        try:
+            confirm1 = input(
+                f"Step 1 of 2 - type exactly the agent id ({spec.id}): "
+            ).strip()
+            confirm2 = input(
+                f"Step 2 of 2 - type exactly DELETE {spec.id}: "
+            ).strip()
+        except EOFError:
+            print("ABORTED - nothing was deleted.")
+            return 2
+        try:
+            trash = kernel.registry.delete_agent(spec.id, confirm1, confirm2)
+        except ValueError as error:
+            print(f"ABORTED - nothing was deleted. Reason: {error}")
+            return 2
+        print(f"Agent '{spec.id}' soft-deleted.")
+        print(f"Snapshot: {trash}")
+        print(f"Restore:  zuri agent restore {spec.id}")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_restore(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        if kernel.registry.get(args.agent_id) is not None:
+            print(
+                f"Agent '{args.agent_id}' is still active; nothing to restore. "
+                "Delete it first with two confirmations."
+            )
+            return 0
+        path = kernel.registry.restore_agent(args.agent_id)
+        print(f"Agent '{args.agent_id}' restored to {path}.")
+        return 0
+    finally:
+        kernel.close()
+
+
+def cmd_agent_history(args: argparse.Namespace) -> int:
+    settings = Settings.load()
+    kernel = Kernel(settings)
+    try:
+        events = kernel.registry.history(args.agent_id, 100)
+        if not events:
+            print("No agent events.")
+            return 0
+        for event in events:
+            print(
+                f"[{event['event_id']}] {event['ts']} {event['action']} "
+                f"{json.dumps(event['data'], ensure_ascii=False)}"
+            )
+        return 0
+    finally:
+        kernel.close()
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="zuri", description="Local-first AI company with evidence-first verification"
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    run = sub.add_parser("run", help="Run one request through Boss and Worker")
+    run.add_argument("request", nargs="+", help="What you want done")
+    run.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Skip the approval gate even if the Boss asks for it",
+    )
+    run.set_defaults(func=cmd_run)
+
+    show = sub.add_parser("show", help="Show a task timeline and evidence")
+    show.add_argument("task_id")
+    show.add_argument("--json", action="store_true", help="Print raw JSON")
+    show.set_defaults(func=cmd_show)
+
+    verify = sub.add_parser("verify", help="Re-run the acceptance checks")
+    verify.add_argument("task_id")
+    verify.set_defaults(func=cmd_verify)
+
+    report = sub.add_parser("report", help="Print the kernel-verified report")
+    report.add_argument("task_id")
+    report.set_defaults(func=cmd_report)
+
+    approve = sub.add_parser("approve", help="Approve a waiting task and run it")
+    approve.add_argument("task_id")
+    approve.set_defaults(func=cmd_approve)
+
+    tasks = sub.add_parser("tasks", help="List recent tasks")
+    tasks.add_argument("--limit", type=int, default=20)
+    tasks.set_defaults(func=cmd_tasks)
+
+    last = sub.add_parser("last", help="Show a short summary of the latest task")
+    last.set_defaults(func=cmd_last)
+
+    verify_last = sub.add_parser("verify-last", help="Re-run checks on the latest task")
+    verify_last.set_defaults(func=cmd_verify_last)
+
+    guide = sub.add_parser("guide", help="Show the simple test steps")
+    guide.set_defaults(func=cmd_guide)
+
+    ping = sub.add_parser("ping", help="Test the DeepSeek API connection")
+    ping.set_defaults(func=cmd_ping)
+
+    agent = sub.add_parser("agent", help="Manage specialist agents")
+    agent_sub = agent.add_subparsers(dest="agent_command", required=True)
+
+    agent_list = agent_sub.add_parser("list", help="List agents")
+    agent_list.set_defaults(func=cmd_agent_list)
+
+    agent_show = agent_sub.add_parser("show", help="Show one agent")
+    agent_show.add_argument("agent_id")
+    agent_show.set_defaults(func=cmd_agent_show)
+
+    agent_create = agent_sub.add_parser(
+        "create", help="Boss/HR drafts a new agent proposal"
+    )
+    agent_create.add_argument("description", nargs="*")
+    agent_create.set_defaults(func=cmd_agent_create)
+
+    agent_proposals = agent_sub.add_parser("proposals", help="List proposals")
+    agent_proposals.add_argument("--all", action="store_true")
+    agent_proposals.set_defaults(func=cmd_agent_proposals)
+
+    agent_approve = agent_sub.add_parser("approve", help="Approve a proposal")
+    agent_approve.add_argument("proposal_id")
+    agent_approve.set_defaults(func=cmd_agent_approve)
+
+    agent_reject = agent_sub.add_parser("reject", help="Reject a proposal")
+    agent_reject.add_argument("proposal_id")
+    agent_reject.set_defaults(func=cmd_agent_reject)
+
+    agent_delete = agent_sub.add_parser(
+        "delete", help="Soft-delete an agent (two confirmations)"
+    )
+    agent_delete.add_argument("agent_id")
+    agent_delete.set_defaults(func=cmd_agent_delete)
+
+    agent_restore = agent_sub.add_parser("restore", help="Restore a soft-deleted agent")
+    agent_restore.add_argument("agent_id")
+    agent_restore.set_defaults(func=cmd_agent_restore)
+
+    agent_history = agent_sub.add_parser("history", help="Show agent audit events")
+    agent_history.add_argument("agent_id")
+    agent_history.set_defaults(func=cmd_agent_history)
+
+    liar = sub.add_parser("liar-test", help="Prove a fake success claim is rejected")
+    liar.set_defaults(func=cmd_liar)
+
+    doctor = sub.add_parser("doctor", help="Check local configuration")
+    doctor.set_defaults(func=cmd_doctor)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except (ValueError, RuntimeError, FileNotFoundError) as error:
+        print(f"ERROR: {error}")
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
