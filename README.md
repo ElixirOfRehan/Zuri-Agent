@@ -23,11 +23,22 @@ Inspect a task:
 
 ```powershell
 .\zuri.cmd tasks
+.\zuri.cmd last            # short summary of the newest task
+.\zuri.cmd verify-last     # re-run checks on the newest task
 .\zuri.cmd show <task-id>
 .\zuri.cmd show <task-id> --json
 .\zuri.cmd verify <task-id>
 .\zuri.cmd report <task-id>
 ```
+
+If a run fails:
+
+```powershell
+.\zuri.cmd ping            # test the DeepSeek connection
+.\zuri.cmd last            # shows the failure reason
+```
+
+`.\zuri.cmd guide` prints the simple test steps.
 
 Approve a risky task:
 
